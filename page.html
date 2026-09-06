@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>BABBLE — бубнёж персонажей: осциллятор и сэмплы</title>
+<style>
+:root{
+  --bg:#030B0C; --term:#062326; --surf:#0A3435; --teal:#16A69B; --glow:#5DE2D0;
+  --mute:#759C96; --text:#D3DED5; --amber:#E9A928; --orange:#E86836; --alarm:#F0713E;
+  --frame:#C8A878;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"IBM Plex Mono","Share Tech Mono",Consolas,"Courier New",monospace;
+  font-size:12px; letter-spacing:.04em; overflow:hidden;
+}
+.crt-overlay{
+  pointer-events:none; position:fixed; inset:0; z-index:9999;
+  background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0,rgba(255,255,255,.025) 1px,transparent 1px,transparent 4px),
+    radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.55) 100%);
+  opacity:.7;
+}
+#term{
+  height:100vh; padding:6px; display:flex; flex-direction:column; gap:6px;
+  border:1px solid #0d4a4c; background:linear-gradient(180deg,#041416,#030B0C);
+}
+.bar{
+  display:flex; align-items:center; gap:10px; padding:4px 8px;
+  background:var(--term); border:1px solid #10484a; border-left:3px solid var(--teal);
+}
+.bar h1{margin:0; font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--glow); font-weight:700}
+.chip{
+  padding:1px 6px; border:1px solid #1d5c5c; color:var(--mute); text-transform:uppercase;
+  letter-spacing:.1em; font-size:10px; white-space:nowrap;
+}
+.chip.on{color:var(--amber); border-color:var(--amber)}
+.spacer{flex:1}
+.vol{display:flex; align-items:center; gap:5px; color:var(--mute); font-size:9px; text-transform:uppercase; letter-spacing:.1em}
+.vol input[type=range]{width:80px; height:12px; accent-color:var(--teal)}
+.vol .val{color:var(--amber); min-width:30px; text-align:right}
+.radio{display:flex; align-items:center; gap:4px; color:var(--mute); font-size:9px; text-transform:uppercase; letter-spacing:.1em; cursor:pointer}
+.radio input{accent-color:var(--orange); width:12px; height:12px; margin:0}
+
+#textrow{display:flex; gap:6px; align-items:stretch}
+#text{
+  flex:1; background:#04191a; color:var(--text); border:1px solid #14514f;
+  font-family:inherit; font-size:12px; letter-spacing:.03em; padding:3px 6px; outline:none;
+}
+#text:focus{border-color:var(--glow)}
+.btn{
+  background:#08383a; color:var(--glow); border:1px solid #1d5c5c; padding:3px 9px; cursor:pointer;
+  font-family:inherit; font-size:10px; text-transform:uppercase; letter-spacing:.12em; white-space:nowrap;
+  transition:border-color 120ms,color 120ms,background 120ms;
+}
+.btn:hover{border-color:var(--glow); background:#0c4a4a; color:#eaf6f2}
+.btn.amber{color:var(--amber); border-color:#7a5c1e}
+.btn.amber:hover{border-color:var(--amber); background:#3a2c0c}
+.btn.stop{color:var(--orange); border-color:#7a3a1e}
+.btn.stop:hover{border-color:var(--orange); background:#3a1c0c}
+
+/* --- карточки персонажей --- */
+#cards{flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:6px}
+.card{
+  display:flex; min-height:0; background:var(--term); border:1px solid #10484a;
+  transition:border-color 140ms;
+}
+.card.playing{border-color:var(--amber); box-shadow:0 0 0 1px rgba(233,169,40,.25) inset}
+.card .pic{
+  flex:0 0 86px; display:flex; align-items:center; justify-content:center; padding:3px;
+  background:#04191a; border-right:1px solid var(--frame); overflow:hidden;
+}
+.card.playing .pic{border-right-color:var(--amber)}
+.card .pic svg{max-height:100%; max-width:100%; height:100%; width:auto; display:block; filter:saturate(.75)}
+.card .pic .noimg{color:var(--mute); font-size:22px; letter-spacing:.2em}
+.card .body{flex:1; min-width:0; display:flex; flex-direction:column}
+.card .head{display:flex; align-items:center; gap:8px; padding:3px 6px; background:#0a3132; border-bottom:1px solid #0f4a4a}
+.card .head h2{margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--glow); font-weight:700; white-space:nowrap}
+.card.playing .head h2{color:var(--amber)}
+.card .head .rl{font-size:9px; color:var(--mute); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.waves,.srcsw{display:flex; gap:0}
+.wv,.sw{
+  background:#062a2b; color:var(--mute); border:1px solid #14514f; border-right:none; padding:2px 5px;
+  cursor:pointer; font-family:inherit; font-size:9px; text-transform:uppercase; letter-spacing:.08em;
+}
+.wv:last-child,.sw:last-child{border-right:1px solid #14514f}
+.wv:hover,.sw:hover{color:var(--glow)}
+.wv.on{background:#0d3f3d; color:var(--amber); border-color:var(--amber)}
+.sw.on{background:#0d3f3d; color:var(--orange); border-color:var(--orange)}
+.card .out{
+  flex:1; min-height:0; padding:4px 8px; overflow:hidden; color:var(--text); font-size:13px; line-height:1.4;
+  background:linear-gradient(180deg,#04191a,#052224);
+}
+.card .out .said{white-space:pre-wrap}
+.card .out .rest{visibility:hidden; white-space:pre-wrap}
+.cur{background:var(--glow); color:var(--glow)}
+.cur.off{background:transparent; color:transparent}
+.knobs{display:grid; grid-template-columns:repeat(4,1fr); gap:3px; padding:3px; border-top:1px solid #0f4a4a}
+.knobs.sm{grid-template-columns:repeat(5,1fr); border-top:none; padding-bottom:0}
+.smp{border-top:1px solid #0f4a4a}
+.knob{border:1px solid #14514f; padding:2px 5px 0; background:#062a2b}
+.knob label{display:block; font-size:8.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--mute); white-space:nowrap; overflow:hidden}
+.knob .val{float:right; color:var(--amber)}
+.knob input[type=range]{width:100%; height:12px; accent-color:var(--teal); background:transparent; margin:0}
+.dip{display:flex; align-items:center; gap:4px; color:var(--mute); font-size:8.5px; text-transform:uppercase;
+  letter-spacing:.08em; border:1px solid #14514f; background:#062a2b; padding:2px 5px; cursor:pointer}
+.dip input{accent-color:var(--orange); width:12px; height:12px; margin:0; flex:0 0 auto}
+.srow{display:flex; align-items:center; gap:3px; padding:3px}
+.srow .dip{flex:0 0 auto; white-space:nowrap}
+.drop{
+  flex:1 1 40%; min-width:0; border:1px dashed #1d5c5c; background:#062a2b; color:var(--mute);
+  font-size:8.5px; text-transform:uppercase; letter-spacing:.08em; padding:3px 6px; cursor:pointer;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.drop:hover,.drop.over{border-color:var(--glow); color:var(--glow)}
+.drop input[type=file]{display:none}
+.bank{flex:1 1 40%; min-width:0; font-size:8.5px; color:var(--frame); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.bank.bad{color:var(--alarm)}
+
+footer{
+  padding:3px 8px; background:var(--term); border:1px solid #10484a; border-left:3px solid var(--frame);
+  color:var(--mute); font-size:9.5px; line-height:1.4;
+}
+footer b{color:var(--frame); font-weight:400}
+.err{color:var(--alarm)}
+#dump{
+  position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:560px; height:340px; background:#04191a; color:var(--text); border:2px solid var(--amber);
+  font-family:inherit; font-size:11px; padding:8px; outline:none;
+}
+#dump[hidden]{display:none}
+</style>
+</head>
+<body>
+<div class="crt-overlay"></div>
+<div id="term">
+
+  <div class="bar">
+    <h1>Babble // осциллятор и сэмплы, пресеты персонажей</h1>
+    <span class="chip" id="chip-ctx">AUDIO: IDLE</span>
+    <span class="spacer"></span>
+    <span class="vol"><span>Громкость</span>
+      <input type="range" id="k-vol" min="0" max="1" step="0.01" value="1">
+      <span class="val" id="v-vol">100%</span></span>
+    <label class="radio"><input type="checkbox" id="k-radio">Радиолиния 300–3400</label>
+    <button class="btn" id="btn-copy">Скопировать пресеты</button>
+    <button class="btn" id="btn-reset">Сброс к стартовым</button>
+    <button class="btn stop" id="btn-stop">Стоп</button>
+  </div>
+
+  <div id="textrow">
+    <input id="text" spellcheck="false" autocomplete="off">
+    <button class="btn amber" id="btn-line">Реплика из комикса</button>
+  </div>
+
+  <div id="cards"></div>
+
+  <footer id="foot"></footer>
+</div>
+
+<textarea id="dump" hidden spellcheck="false"></textarea>
+
+<script>
+"use strict";
+const BUILD = /*__BUILD__*/ {date:"?"};
+const PORTRAITS = /*__PORTRAITS__*/ {};
+/** Встроенные банки мычания: { '58': [три data-URI ogg], '54': [три data-URI ogg] }. Вшивает build.mjs. */
+const HUMS = /*__HUMS__*/ {};
+
+/* ---------------- персонажи и стартовые пресеты ----------------
+   Отбор 2026-09-05: способы «банки слогов», «Animal Crossing» и SAM сняты.
+   Осталось два источника: осциллятор на букву (эталон, пресет Чейза нравится как есть)
+   и сэмплы «как в Aurelia» — короткое записанное «мх» на каждый N-й символ.
+   Стартовый источник у всех — осциллятор: это отобранный ранее вариант, сэмплы включаются кнопкой. */
+const CHARS = [
+  { id:'58',   name:'Чейз Альбертович', role:'диспетчер на пенсии, неспешный', line:'Хранилище смотришь?' },
+  { id:'54',   name:'Блонде Блейзер',   role:'молодая, звонкая, быстрая',
+    line:'Диспетчер, вопрос вне эфира. Вы разговариваете со мной чаще, чем с остальными.' },
+  { id:'57',   name:'Громила Жёсткий',  role:'огромный, виноватый, с паузами', line:'Диспетчер. Тут... ручка.' },
+  { id:'oleg', name:'Олег (диспетчер)', role:'усталый, ровный, средний',       line:'Диспетчерская, слушаю.' },
+];
+
+/** Чей встроенный банк слушает персонаж. У 57 и oleg своего нет — берут банк Чейза со сдвигом питча. */
+const BANK_OF = { '58':'58', '54':'54', '57':'58', 'oleg':'58' };
+
+const DEFAULTS = {
+  '58':   { source:'osc', wave:'triangle', hz:130, jitter:3, charMs:22, blipMs:60,  decayMs:40, lowpass:2500, pauseMul:1,   questionMul:1.15, consonantDip:true,
+            everyN:4, pitchMin:0.9,  pitchMax:1.05, sampleGain:-6, cut:false },
+  '54':   { source:'osc', wave:'triangle', hz:190, jitter:3, charMs:16, blipMs:55,  decayMs:38, lowpass:3000, pauseMul:1,   questionMul:1.15, consonantDip:true,
+            everyN:4, pitchMin:0.9,  pitchMax:1.05, sampleGain:-6, cut:false },
+  '57':   { source:'osc', wave:'square',   hz:75,  jitter:4, charMs:45, blipMs:110, decayMs:80, lowpass:1200, pauseMul:1.3, questionMul:1.1,  consonantDip:true,
+            everyN:4, pitchMin:0.7,  pitchMax:0.8,  sampleGain:-6, cut:false },
+  'oleg': { source:'osc', wave:'triangle', hz:150, jitter:3, charMs:24, blipMs:60,  decayMs:42, lowpass:2200, pauseMul:1,   questionMul:1.15, consonantDip:true,
+            everyN:4, pitchMin:0.95, pitchMax:1.1,  sampleGain:-6, cut:false },
+};
+const FIELDS = ['source','wave','hz','jitter','charMs','blipMs','decayMs','lowpass','pauseMul','questionMul','consonantDip',
+                'everyN','pitchMin','pitchMax','sampleGain','cut'];
+const WAVES = ['sine','triangle','square','sawtooth'];
+const SOURCES = ['osc','samples'];
+const BOOL_FIELDS = ['consonantDip','cut'];
+const ENUM_FIELDS = { wave:WAVES, source:SOURCES };
+
+/** Ползунки осциллятора: input id «k-<char>-<поле>», подпись «v-<char>-<поле>». */
+const KNOBS = [
+  { k:'hz',          lab:'Частота, Гц',  min:60,  max:400,  step:1,    fmt:(v) => v },
+  { k:'charMs',      lab:'Темп, мс/сим', min:12,  max:90,   step:1,    fmt:(v) => v },
+  { k:'blipMs',      lab:'Блип, мс',     min:20,  max:140,  step:1,    fmt:(v) => v },
+  { k:'decayMs',     lab:'Спад, мс',     min:10,  max:120,  step:1,    fmt:(v) => v },
+  { k:'lowpass',     lab:'НЧ-фильтр, Гц',min:800, max:8000, step:50,   fmt:(v) => v },
+  { k:'jitter',      lab:'Джиттер, %',   min:0,   max:15,   step:1,    fmt:(v) => v },
+  { k:'pauseMul',    lab:'Паузы, ×',     min:0,   max:2,    step:0.05, fmt:(v) => Number(v).toFixed(2) },
+  { k:'questionMul', lab:'Вопрос, ×',    min:1,   max:1.4,  step:0.01, fmt:(v) => Number(v).toFixed(2) },
+];
+/** Ползунки сэмплов: input id «ks-<char>-<поле>», подпись «vs-<char>-<поле>».
+    Темп печати, паузы и вопрос общие для источников — правятся в режиме осциллятора. */
+const KNOBS_SMP = [
+  { k:'everyN',     lab:'Каждый N-й',   min:1,    max:8,    step:1,    fmt:(v) => v },
+  { k:'pitchMin',   lab:'Питч мин, ×',  min:0.5,  max:1.6,  step:0.01, fmt:(v) => Number(v).toFixed(2) },
+  { k:'pitchMax',   lab:'Питч макс, ×', min:0.5,  max:1.6,  step:0.01, fmt:(v) => Number(v).toFixed(2) },
+  { k:'sampleGain', lab:'Громк., дБ',   min:-24,  max:6,    step:1,    fmt:(v) => (v > 0 ? '+' : '') + v },
+  { k:'lowpass',    lab:'НЧ-фильтр, Гц',min:800,  max:8000, step:50,   fmt:(v) => v },
+];
+
+/* ---------------- состояние и localStorage ---------------- */
+const LS = 'babble-demo-20260905-chip';
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const presets = clone(DEFAULTS);
+const ui = { vol:1, radio:false, lineIdx:0 };
+
+/** Читаем только известные поля известных персонажей: чужой/старый JSON не должен ломать страницу. */
+function load(){
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) { return; }
+  if (!s || typeof s !== 'object') return;
+  if (s.ui && typeof s.ui === 'object') {
+    if (typeof s.ui.vol === 'number') ui.vol = Math.min(1, Math.max(0, s.ui.vol));
+    if (typeof s.ui.radio === 'boolean') ui.radio = s.ui.radio;
+  }
+  if (!s.presets || typeof s.presets !== 'object') return;
+  for (const c of CHARS) {
+    const p = s.presets[c.id];
+    if (!p || typeof p !== 'object') continue;
+    for (const f of FIELDS) {
+      const v = p[f];
+      if (ENUM_FIELDS[f]) { if (ENUM_FIELDS[f].indexOf(v) >= 0) presets[c.id][f] = v; }
+      else if (BOOL_FIELDS.indexOf(f) >= 0) { if (typeof v === 'boolean') presets[c.id][f] = v; }
+      else if (typeof v === 'number' && isFinite(v)) presets[c.id][f] = v;
+    }
+  }
+}
+function save(){ try { localStorage.setItem(LS, JSON.stringify({ presets: presets, ui: ui })); } catch (e) {} }
+load();
+
+/* ---------------- аудио-каркас ---------------- */
+let ctx = null, master = null, hp = null, lpRadio = null;
+let active = [];             // ноды текущего проигрывания
+let rafId = 0, playing = null;
+/** Источники последнего play(): OscillatorNode или AudioBufferSourceNode — для живой проверки. */
+const debug = { lastNodes: [] };
+
+function ensureCtx(){
+  if (ctx) return ctx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  ctx = new AC();
+  master = ctx.createGain();
+  hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 300;
+  lpRadio = ctx.createBiquadFilter(); lpRadio.type = 'lowpass'; lpRadio.frequency.value = 3400;
+  hp.connect(lpRadio); lpRadio.connect(ctx.destination);
+  routeMaster();
+  applyVolume();
+  return ctx;
+}
+function routeMaster(){
+  if (!master) return;
+  try { master.disconnect(); } catch (e) {}
+  if (ui.radio) master.connect(hp); else master.connect(ctx.destination);
+}
+/** Мастер −12 дБ (0.25) × ползунок громкости. */
+function applyVolume(){ if (master) master.gain.value = 0.25 * ui.vol; }
+
+/* ---------------- банки сэмплов ----------------
+   Встроенные банки вшиты в страницу как data:audio/ogg;base64 — по file:// fetch запрещён.
+   Пользовательские файлы живут только в памяти вкладки, в localStorage их не пишем. */
+const builtinBanks = {};                 // '58': [AudioBuffer ×3]
+const customBanks = {};                  // charId: { buffers:[AudioBuffer], names:[string] }
+let banksPromise = null;
+
+function dataUrlToArrayBuffer(url){
+  const s = String(url);
+  const bin = atob(s.slice(s.indexOf(',') + 1));
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8.buffer;
+}
+/** Декодирование встроенных банков — один раз на вкладку, дальше отдаём тот же промис. */
+function ensureBanks(){
+  if (banksPromise) return banksPromise;
+  ensureCtx();
+  const jobs = [];
+  const ids = Object.keys(HUMS);
+  for (const bid of ids) {
+    builtinBanks[bid] = [];
+    const urls = HUMS[bid];
+    for (let i = 0; i < urls.length; i++) {
+      jobs.push(ctx.decodeAudioData(dataUrlToArrayBuffer(urls[i]))
+        .then(((b, j) => (buf) => { builtinBanks[b][j] = buf; })(bid, i)));
+    }
+  }
+  banksPromise = Promise.all(jobs).then(function(){ return builtinBanks; });
+  return banksPromise;
+}
+/** Какие буферы слушает персонаж: свои, если загружены, иначе встроенный банк BANK_OF. */
+function bankBuffers(charId){
+  const cb = customBanks[charId];
+  if (cb && cb.buffers.length) return cb.buffers;
+  return builtinBanks[BANK_OF[charId]] || [];
+}
+function bankId(charId){
+  const cb = customBanks[charId];
+  if (cb && cb.buffers.length) return 'custom';
+  return 'builtin:' + BANK_OF[charId];
+}
+/** Честная подпись на карточке: у 57 и Олега своего банка нет, и это должно быть видно. */
+function bankNote(charId){
+  const cb = customBanks[charId];
+  if (cb && cb.buffers.length) {
+    const names = cb.names.length ? cb.names.join(', ') : cb.buffers.length + ' файл(ов)';
+    return 'свои: ' + names + ' — до перезагрузки';
+  }
+  const b = BANK_OF[charId];
+  const n = (builtinBanks[b] || []).length || (HUMS[b] || []).length;
+  return b === charId ? 'встроенный банк ' + b + ', сэмплов ' + n : 'банк Чейза, сдвинут, сэмплов ' + n;
+}
+
+/**
+ * Заменить банк персонажа своими сэмплами. Принимает массив ArrayBuffer (drag&drop, <input type=file>
+ * или прямой вызов из консоли/проверки). Декодируем копию: decodeAudioData отбирает буфер себе.
+ */
+async function loadCustomBank(charId, arrayBuffers, names){
+  if (!BANK_OF[charId]) throw new Error('нет такого персонажа: ' + charId);
+  ensureCtx();
+  const list = Array.prototype.slice.call(arrayBuffers || []).slice(0, 6);
+  if (!list.length) throw new Error('не передано ни одного файла');
+  const bufs = [];
+  for (let i = 0; i < list.length; i++) bufs.push(await ctx.decodeAudioData(list[i].slice(0)));
+  customBanks[charId] = { buffers: bufs, names: (names || []).slice(0, 6).map(String) };
+  syncUI();
+  return { char: charId, count: bufs.length, bank: bankId(charId),
+           durations: bufs.map(function(b){ return Number(b.duration.toFixed(3)); }) };
+}
+
+function readFilesInto(charId, fileList){
+  const files = Array.prototype.slice.call(fileList || []).slice(0, 6);
+  if (!files.length) return;
+  const jobs = files.map(function(f){
+    return new Promise(function(res, rej){
+      const fr = new FileReader();
+      fr.onload = function(){ res(fr.result); };
+      fr.onerror = function(){ rej(new Error('не прочитан ' + f.name)); };
+      fr.readAsArrayBuffer(f);       // по file:// это работает, в отличие от fetch
+    });
+  });
+  Promise.all(jobs)
+    .then(function(bufs){ return loadCustomBank(charId, bufs, files.map(function(f){ return f.name; })); })
+    .catch(function(err){
+      const el2 = document.getElementById('bank-' + charId);
+      if (el2) { el2.textContent = 'не декодировано: ' + (err && err.message); el2.classList.add('bad'); }
+    });
+}
+
+/* ---------------- разметка текста ---------------- */
+const VOWELS = 'аеёиоуыэюяaeiouy';
+const isLetter = (c) => /[a-zа-яё]/i.test(c);
+const isVowel  = (c) => VOWELS.indexOf(c.toLowerCase()) >= 0;
+
+/** Момент печати каждого символа, мс от старта. Знаки добавляют паузу после себя (× pauseMul). */
+function timeline(text, charMs, pauseMul){
+  const t = new Array(text.length);
+  const mul = typeof pauseMul === 'number' ? pauseMul : 1;
+  let cur = 0;
+  for (let i = 0; i < text.length; i++) {
+    t[i] = cur;
+    cur += charMs;
+    const c = text[i];
+    if (c === ',' || c === ';' || c === ':') cur += 120 * mul;
+    else if (c === '.' || c === '…' || c === '!' || c === '?') {
+      // «...» — пауза один раз, на последней точке подряд
+      if (!(c === '.' && text[i + 1] === '.')) cur += 250 * mul;
+    }
+  }
+  return { t: t, total: cur };
+}
+
+/** Вопросительная интонация: последние до шести букв перед «?» ползут вверх к questionMul. */
+function questionRise(text, mul){
+  const r = {};
+  if (!(mul > 1.0001)) return r;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '?') continue;
+    const idx = [];
+    for (let j = i - 1; j >= 0 && idx.length < 6; j--) {
+      if (isLetter(text[j])) idx.push(j);
+      else if (/\s/.test(text[j])) continue;
+      else break;
+    }
+    idx.reverse();
+    for (let k = 0; k < idx.length; k++) r[idx[k]] = 1 + (mul - 1) * ((k + 1) / idx.length);
+  }
+  return r;
+}
+
+/**
+ * ПРАВИЛО ЗАПУСКА СЭМПЛОВ (режим «сэмплы»), зафиксировано ровно так и проверяется в check.mjs:
+ * сэмпл играет на символах с индексом i, для которых i % everyN === 0. Считаются ВСЕ символы —
+ * пробелы и знаки тоже, как в Aurelia (там `time % 4 == 1` по кадрам печати, один символ за кадр).
+ * Паузы знаков сдвигают моменты по времени, но не меняют их число, поэтому запусков ровно
+ * ceil(длина / everyN) — без «±1».
+ */
+function sampleIndexes(text, everyN){
+  const n = Math.max(1, Math.round(everyN));
+  const out = [];
+  for (let i = 0; i < text.length; i++) if (i % n === 0) out.push(i);
+  return out;
+}
+const sampleCount = (len, everyN) => Math.ceil(len / Math.max(1, Math.round(everyN)));
+
+/* ---------------- планировщик ---------------- */
+function stopAll(){
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = 0;
+  for (const n of active) { try { n.stop(0); } catch (e) {} try { n.disconnect(); } catch (e) {} }
+  active = [];
+  playing = null;
+  const cards = document.querySelectorAll('.card');
+  for (const c of cards) { c.classList.remove('playing'); clearOut(c.querySelector('.out')); }
+}
+function clearOut(el2){
+  if (!el2) return;
+  el2.querySelector('.said').textContent = '';
+  el2.querySelector('.rest').textContent = '';
+  el2.querySelector('.cur').classList.add('off');
+}
+
+/** Выходной lowpass, общий для обоих источников — тот же ползунок «НЧ-фильтр». */
+function makeLowpass(p){
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = p.lowpass;
+  lp.Q.value = 0.7;
+  lp.connect(master);
+  active.push(lp);
+  return lp;
+}
+
+/** Весь звук реплики планируется заранее по ctx.currentTime: setTimeout на каждую букву дрожал бы. */
+function scheduleOsc(text, t0, tl, p){
+  const lp = makeLowpass(p);
+  const rise = questionRise(text, p.questionMul);
+  const len = Math.max(0.01, p.blipMs / 1000);
+  const dec = Math.max(0.005, p.decayMs / 1000);
+  const decEnd = Math.min(0.005 + dec, Math.max(len, 0.008));   // спад не длиннее самого блипа
+  let events = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (!isLetter(c)) continue;
+    const when = t0 + tl.t[i] / 1000;
+    let f = p.hz;
+    if (p.consonantDip && !isVowel(c)) f *= 0.85;              // согласные ниже — голос не монотонный
+    f *= 1 + (Math.random() * 2 - 1) * (p.jitter / 100);
+    if (rise[i]) f *= rise[i];
+    const o = ctx.createOscillator();
+    o.type = p.wave;
+    o.frequency.value = Math.max(20, Math.min(12000, f));
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.45, when + 0.005);         // атака 5 мс
+    g.gain.exponentialRampToValueAtTime(0.0002, when + decEnd);
+    o.connect(g); g.connect(lp);
+    o.start(when); o.stop(when + Math.max(len, decEnd) + 0.005);
+    active.push(o); debug.lastNodes.push(o);
+    events++;
+  }
+  return events;
+}
+
+/**
+ * Сэмплы «как в Aurelia»: записанное «мх» на каждый N-й символ, каждый раз случайный сэмпл из банка
+ * и случайный playbackRate в [pitchMin, pitchMax]. Наложение по умолчанию не гасится (cut = false) —
+ * в игре хвост предыдущего звука так и звучит поверх нового; галка «обрезать пред.» включает обрезку.
+ * Громкость сэмплов — один общий гейн на реплику (sampleGain, дБ), дальше общий lowpass и мастер.
+ */
+function scheduleSamples(text, t0, tl, p, charId){
+  const lp = makeLowpass(p);
+  const sg = ctx.createGain();
+  sg.gain.value = Math.pow(10, p.sampleGain / 20);
+  sg.connect(lp);
+  active.push(sg);
+
+  const bank = bankBuffers(charId);
+  if (!bank.length) return 0;
+  const lo = Math.min(p.pitchMin, p.pitchMax);
+  const hi = Math.max(p.pitchMin, p.pitchMax);
+  const idx = sampleIndexes(text, p.everyN);
+  let prev = null;
+
+  for (const i of idx) {
+    const when = t0 + tl.t[i] / 1000;
+    const src = ctx.createBufferSource();
+    src.buffer = bank[Math.floor(Math.random() * bank.length)];
+    src.playbackRate.value = lo + Math.random() * (hi - lo);
+    src.connect(sg);
+    src.start(when);
+    if (p.cut && prev) { try { prev.stop(when); } catch (e) {} }
+    prev = src;
+    active.push(src); debug.lastNodes.push(src);
+  }
+  return idx.length;
+}
+
+/** Печать по тому же timeline: один rAF-цикл вместо таймера на символ — иначе паузы знаков разъехались бы со звуком. */
+function typeLoop(out, text, tl, startPerf){
+  const said = out.querySelector('.said');
+  const rest = out.querySelector('.rest');
+  const cur  = out.querySelector('.cur');
+  cur.classList.remove('off');
+  const step = function(){
+    const el2 = performance.now() - startPerf;
+    let n = 0;
+    while (n < text.length && tl.t[n] <= el2) n++;
+    said.textContent = text.slice(0, n);
+    rest.textContent = text.slice(n);
+    if (n >= text.length) { cur.classList.add('off'); rafId = 0; return; }
+    rafId = requestAnimationFrame(step);
+  };
+  rafId = requestAnimationFrame(step);
+}
+
+async function play(charId, text){
+  stopAll();                                   // ▶ на одной карточке глушит остальные
+  let ch = null;
+  for (const c of CHARS) if (c.id === charId) ch = c;
+  if (!ch) ch = CHARS[0];
+  const p = presets[ch.id];
+  if (text === undefined || text === null || String(text).trim() === '') text = ch.line;
+  text = String(text);
+  ensureCtx();
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) {} }
+  const smp = p.source === 'samples';
+  if (smp) await ensureBanks();        // декодируем до отсчёта времени, иначе старт уехал бы в прошлое
+  const tl = timeline(text, p.charMs, p.pauseMul);
+  const lead = 0.08;
+  debug.lastNodes = [];
+  const events = smp ? scheduleSamples(text, ctx.currentTime + lead, tl, p, ch.id)
+                     : scheduleOsc(text, ctx.currentTime + lead, tl, p);
+  const card = document.querySelector('.card[data-id="' + ch.id + '"]');
+  if (card) {
+    card.classList.add('playing');
+    typeLoop(card.querySelector('.out'), text, tl, performance.now() + lead * 1000);
+  }
+  playing = ch.id;
+  setChip();
+  return { char: ch.id, source: p.source, events: events, chars: text.length, durationMs: tl.total,
+           wave: p.wave, hz: p.hz, charMs: p.charMs, lowpass: p.lowpass,
+           everyN: p.everyN, pitchMin: p.pitchMin, pitchMax: p.pitchMax,
+           sampleGain: p.sampleGain, cut: p.cut,
+           bank: bankId(ch.id), bankSize: bankBuffers(ch.id).length,
+           expected: smp ? sampleCount(text.length, p.everyN) : null,
+           ctxTime: ctx.currentTime, ctxState: ctx.state, nodes: active.length };
+}
+
+/* ---------------- экспорт пресетов ---------------- */
+function exportJson(){
+  const out = {};
+  for (const c of CHARS) {
+    const p = presets[c.id];
+    const o = {};
+    for (const f of FIELDS) o[f] = p[f];
+    // имена пользовательских файлов не воспроизводимы — в JSON только ярлык банка
+    o.bank = bankId(c.id);
+    out[c.id] = o;
+  }
+  return JSON.stringify(out, null, 2);
+}
+
+function copyPresets(){
+  const json = exportJson();
+  const done = function(){ flash('btn-copy', 'Скопировано'); };
+  const fallback = function(){
+    const d = document.getElementById('dump');
+    d.value = json; d.hidden = false; d.focus(); d.select();
+    flash('btn-copy', 'Буфер закрыт — выделено');
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(json).then(done, fallback);
+    } else fallback();
+  } catch (e) { fallback(); }
+  return json;
+}
+let flashT = 0;
+function flash(id, msg){
+  const b = document.getElementById(id);
+  if (!b) return;
+  if (!b.dataset.label) b.dataset.label = b.textContent;
+  b.textContent = msg;
+  clearTimeout(flashT);
+  flashT = setTimeout(function(){ b.textContent = b.dataset.label; }, 1600);
+}
+
+/** Сброс правит только пресеты: загруженные сэмплы — состояние сессии, их не трогаем. */
+function resetPresets(){
+  for (const c of CHARS) presets[c.id] = clone(DEFAULTS[c.id]);
+  save(); syncUI();
+  document.getElementById('dump').hidden = true;
+}
+
+/* ---------------- интерфейс ---------------- */
+function el(html){ const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; }
+
+/** pfx: '' — ползунок осциллятора (k-…/v-…), 's' — ползунок сэмплов (ks-…/vs-…). */
+function knobHtml(pfx, cid, k){
+  return '<div class="knob"><label>' + k.lab + ' <span class="val" id="v' + pfx + '-' + cid + '-' + k.k + '"></span></label>'
+    + '<input type="range" id="k' + pfx + '-' + cid + '-' + k.k + '" data-id="' + cid + '" data-k="' + k.k + '"'
+    + ' min="' + k.min + '" max="' + k.max + '" step="' + k.step + '"></div>';
+}
+
+function renderCards(){
+  const box = document.getElementById('cards');
+  box.innerHTML = '';
+  for (const c of CHARS) {
+    const pic = PORTRAITS[c.id] ? PORTRAITS[c.id] : '<span class="noimg">' + c.id.toUpperCase() + '</span>';
+    let knobs = '';
+    for (const k of KNOBS) knobs += knobHtml('', c.id, k);
+    let sknobs = '';
+    for (const k of KNOBS_SMP) sknobs += knobHtml('s', c.id, k);
+    let waves = '';
+    for (const w of WAVES) waves += '<button class="wv" data-id="' + c.id + '" data-w="' + w + '">' + w.slice(0, 3) + '</button>';
+
+    const card = el(
+      '<div class="card" data-id="' + c.id + '">'
+      + '<div class="pic">' + pic + '</div>'
+      + '<div class="body">'
+      +   '<div class="head">'
+      +     '<button class="btn amber play" data-id="' + c.id + '">▶</button>'
+      +     '<h2>' + c.name + '</h2>'
+      +     '<span class="rl">' + c.role + '</span>'
+      +     '<span class="spacer"></span>'
+      +     '<div class="srcsw">'
+      +       '<button class="sw" data-id="' + c.id + '" data-src="osc">осц</button>'
+      +       '<button class="sw" data-id="' + c.id + '" data-src="samples">сэмпл</button>'
+      +     '</div>'
+      +     '<div class="waves">' + waves + '</div>'
+      +     '<label class="dip cons"><input type="checkbox" id="k-' + c.id + '-consonantDip" data-id="' + c.id + '" data-k="consonantDip">Согласные ×0,85</label>'
+      +   '</div>'
+      +   '<div class="out"><span class="said"></span><span class="cur off">&nbsp;</span><span class="rest"></span></div>'
+      +   '<div class="knobs osc">' + knobs + '</div>'
+      +   '<div class="smp" hidden>'
+      +     '<div class="knobs sm">' + sknobs + '</div>'
+      +     '<div class="srow">'
+      +       '<label class="dip"><input type="checkbox" id="ks-' + c.id + '-cut" data-id="' + c.id + '" data-k="cut">Обрезать пред.</label>'
+      +       '<label class="drop" data-drop="' + c.id + '" title="wav / ogg / mp3, до 6 файлов. Сэмплы Aurelia: C:/Program Files (x86)/Steam/steamapps/common/Aurelia/so_*.ogg">'
+      +         'Перетащите 1–6 файлов wav/ogg/mp3'
+      +         '<input type="file" multiple accept="audio/*,.wav,.ogg,.mp3" data-file="' + c.id + '">'
+      +       '</label>'
+      +       '<span class="bank" id="bank-' + c.id + '"></span>'
+      +     '</div>'
+      +   '</div>'
+      + '</div>'
+      + '</div>');
+    box.appendChild(card);
+  }
+
+  box.addEventListener('click', function(e){
+    const play2 = e.target.closest('.play');
+    if (play2) {
+      const id = play2.dataset.id;
+      window.__babble.play(id, document.getElementById('text').value).catch(function(err){
+        console.error(err);
+        const said = document.querySelector('.card[data-id="' + id + '"] .said');
+        if (said) said.innerHTML = '<span class="err">ОШИБКА: ' + (err && err.message) + '</span>';
+      });
+      return;
+    }
+    const sw = e.target.closest('.sw');
+    if (sw) { presets[sw.dataset.id].source = sw.dataset.src; save(); syncUI(); return; }
+    const wv = e.target.closest('.wv');
+    if (wv) { presets[wv.dataset.id].wave = wv.dataset.w; save(); syncUI(); }
+  });
+  box.addEventListener('input', function(e){
+    const inp = e.target;
+    if (!inp.dataset || !inp.dataset.id || !inp.dataset.k) return;
+    if (inp.type === 'checkbox') presets[inp.dataset.id][inp.dataset.k] = inp.checked;
+    else presets[inp.dataset.id][inp.dataset.k] = Number(inp.value);
+    save(); syncUI();
+  });
+  box.addEventListener('change', function(e){
+    const f = e.target;
+    if (f && f.dataset && f.dataset.file) { readFilesInto(f.dataset.file, f.files); f.value = ''; }
+  });
+
+  // drag&drop по file:// работает — в отличие от fetch, это единственный путь для чужих сэмплов
+  for (const zone of box.querySelectorAll('.drop')) {
+    const id = zone.dataset.drop;
+    zone.addEventListener('dragover', function(e){ e.preventDefault(); e.stopPropagation(); zone.classList.add('over'); });
+    zone.addEventListener('dragleave', function(){ zone.classList.remove('over'); });
+    zone.addEventListener('drop', function(e){
+      e.preventDefault(); e.stopPropagation(); zone.classList.remove('over');
+      readFilesInto(id, e.dataTransfer && e.dataTransfer.files);
+    });
+  }
+}
+
+function setChip(){
+  const c = document.getElementById('chip-ctx');
+  c.textContent = 'AUDIO: ' + (ctx ? ctx.state.toUpperCase() + (playing ? ' / ' + playing.toUpperCase() : '') : 'IDLE');
+  c.className = 'chip' + (ctx && ctx.state === 'running' ? ' on' : '');
+}
+
+function syncUI(){
+  for (const c of CHARS) {
+    const p = presets[c.id];
+    const card = document.querySelector('.card[data-id="' + c.id + '"]');
+    for (const k of KNOBS) {
+      const inp = document.getElementById('k-' + c.id + '-' + k.k);
+      const val = document.getElementById('v-' + c.id + '-' + k.k);
+      if (inp) inp.value = p[k.k];
+      if (val) val.textContent = k.fmt(p[k.k]);
+    }
+    for (const k of KNOBS_SMP) {
+      const inp = document.getElementById('ks-' + c.id + '-' + k.k);
+      const val = document.getElementById('vs-' + c.id + '-' + k.k);
+      if (inp) inp.value = p[k.k];
+      if (val) val.textContent = k.fmt(p[k.k]);
+    }
+    const dip = document.getElementById('k-' + c.id + '-consonantDip');
+    if (dip) dip.checked = !!p.consonantDip;
+    const cut = document.getElementById('ks-' + c.id + '-cut');
+    if (cut) cut.checked = !!p.cut;
+    const wvs = document.querySelectorAll('.card[data-id="' + c.id + '"] .wv');
+    for (const w of wvs) w.classList.toggle('on', w.dataset.w === p.wave);
+    const sws = document.querySelectorAll('.card[data-id="' + c.id + '"] .sw');
+    for (const s of sws) s.classList.toggle('on', s.dataset.src === p.source);
+    if (card) {
+      // ползунки неактивного источника прячем целиком: карточка не растёт и шрифт не приходится мельчить
+      const smp = p.source === 'samples';
+      card.querySelector('.waves').hidden = smp;
+      card.querySelector('.dip.cons').hidden = smp;
+      card.querySelector('.knobs.osc').hidden = smp;
+      card.querySelector('.smp').hidden = !smp;
+      const note = document.getElementById('bank-' + c.id);
+      if (note) { note.textContent = bankNote(c.id); note.classList.remove('bad'); }
+    }
+  }
+  document.getElementById('k-vol').value = ui.vol;
+  document.getElementById('v-vol').textContent = Math.round(ui.vol * 100) + '%';
+  document.getElementById('k-radio').checked = ui.radio;
+  setChip();
+}
+
+function init(){
+  renderCards();
+
+  const ta = document.getElementById('text');
+  ta.value = CHARS[0].line;
+
+  document.getElementById('btn-line').addEventListener('click', function(){
+    ui.lineIdx = (ui.lineIdx + 1) % CHARS.length;
+    ta.value = CHARS[ui.lineIdx].line;
+  });
+  document.getElementById('btn-stop').addEventListener('click', function(){ stopAll(); setChip(); });
+  document.getElementById('btn-copy').addEventListener('click', copyPresets);
+  document.getElementById('btn-reset').addEventListener('click', resetPresets);
+  document.getElementById('dump').addEventListener('blur', function(){ this.hidden = true; });
+
+  document.getElementById('k-vol').addEventListener('input', function(){
+    ui.vol = Number(this.value); applyVolume(); save(); syncUI();
+  });
+  document.getElementById('k-radio').addEventListener('input', function(){
+    ui.radio = this.checked; if (ctx) routeMaster(); save(); syncUI();
+  });
+
+  // файл, брошенный мимо зоны, иначе открылся бы вместо страницы
+  window.addEventListener('dragover', function(e){ e.preventDefault(); });
+  window.addEventListener('drop', function(e){ e.preventDefault(); });
+
+  document.getElementById('foot').innerHTML =
+    '<b>Два источника, переключатель на карточке.</b> <b>Осц</b> — короткий тон на каждую букву (Undertale / Celeste), ассетов не требует. '
+    + '<b>Сэмпл</b> — как в Aurelia: записанное «мх» на каждый N-й символ (по умолчанию 4-й; считаются все символы, включая пробелы и знаки), '
+    + 'сэмпл каждый раз случайный из банка, playbackRate случайный в [питч мин, питч макс], наложение не гасится — галка «обрезать пред.» включает обрезку. '
+    + 'Встроенные банки: 58 и 54, по три «мх», вырезаны из bark-мычания. У 57 и Олега своего банка нет — играет банк Чейза со сдвинутым питчем, так и подписано. '
+    + 'Свои сэмплы — перетащить 1–6 файлов wav/ogg/mp3 на карточку; они живут до перезагрузки и в пресет не пишутся (только ярлык <b>bank</b>). '
+    + 'Сэмплы Aurelia лежат в <b>C:/Program Files (x86)/Steam/steamapps/common/Aurelia/so_*.ogg</b> — чужой ассет, в страницу не вшит. '
+    + 'Темп печати, паузы, вопрос и НЧ-фильтр общие для источников. Мастер −12 дБ, «радиолиния» — highpass 300 + lowpass 3400. '
+    + 'Печать — как в плеере (<b>web/player/src/dialogue/Line.tsx</b>), таймлайн общий со звуком. Сборка ' + BUILD.date + '.';
+
+  syncUI();
+
+  window.__babble = {
+    play: play, stop: stopAll, presets: presets, DEFAULTS: DEFAULTS, CHARS: CHARS,
+    KNOBS: KNOBS, KNOBS_SMP: KNOBS_SMP, WAVES: WAVES, SOURCES: SOURCES, FIELDS: FIELDS,
+    BANK_OF: BANK_OF, ui: ui, BUILD: BUILD, debug: debug,
+    exportJson: exportJson, copy: copyPresets, reset: resetPresets,
+    timeline: timeline, questionRise: questionRise,
+    sampleIndexes: sampleIndexes, sampleCount: sampleCount,
+    ensureBanks: ensureBanks, loadCustomBank: loadCustomBank, bankId: bankId, bankNote: bankNote,
+    get banks(){ return { builtin: builtinBanks, custom: customBanks }; },
+    get ctx(){ return ctx; },
+    get playing(){ return playing; },
+    get active(){ return active.length; },
+    ensure: ensureCtx,
+  };
+}
+init();
+</script>
+</body>
+</html>
