@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BABBLE — бубнёж персонажей: осциллятор и сэмплы</title>
 <style>
 :root{
@@ -37,6 +38,8 @@ body{
   letter-spacing:.1em; font-size:10px; white-space:nowrap;
 }
 .chip.on{color:var(--amber); border-color:var(--amber)}
+/* iOS может оставить контекст спящим даже после жеста — это должно быть видно, а не съедено молча */
+.chip.warn{color:var(--alarm); border-color:var(--alarm)}
 .spacer{flex:1}
 .vol{display:flex; align-items:center; gap:5px; color:var(--mute); font-size:9px; text-transform:uppercase; letter-spacing:.1em}
 .vol input[type=range]{width:80px; height:12px; accent-color:var(--teal)}
@@ -124,6 +127,9 @@ footer{
   color:var(--mute); font-size:9.5px; line-height:1.4;
 }
 footer b{color:var(--frame); font-weight:400}
+/* На широком экране подвал всегда развёрнут, а сам заголовок не занимает строку. */
+footer summary{display:none}
+.drop .mob{display:none}
 .err{color:var(--alarm)}
 #dump{
   position:fixed; z-index:10000; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -131,6 +137,116 @@ footer b{color:var(--frame); font-weight:400}
   font-family:inherit; font-size:11px; padding:8px; outline:none;
 }
 #dump[hidden]{display:none}
+
+/* ==================== адаптив ====================
+   Десктоп (шире 1100 px) не трогаем: страница по-прежнему целиком в одном экране, без прокрутки.
+   Узкий экран — обратная логика: прокрутка страницы разрешена, карточки растут по содержимому,
+   кегль поднимается до читаемого, тач-цели — не меньше 44×44 px (WCAG 2.5.5). */
+
+/* --- планшет и узкое окно: две колонки, страница прокручивается --- */
+@media (max-width:1100px){
+  html,body{height:auto; min-height:100%}
+  body{overflow:visible; font-size:13px}
+  #term{height:auto; min-height:100vh}
+  /* minmax(0,1fr): иначе колонка растягивается по min-content шапки карточки и страница едет вбок */
+  #cards{flex:none; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:auto; align-content:start}
+  .bar{flex-wrap:wrap}
+  .card{min-height:0; min-width:0}
+  .card .body{min-width:0}
+  .card .head{flex-wrap:wrap; row-gap:4px}
+  .card .head h2,.card .head .rl{white-space:normal}
+  .knobs,.knobs.sm{grid-template-columns:repeat(2,1fr)}
+  /* высота по содержимому: обрезать текст нечем — страница прокручивается */
+  .card .out{flex:0 0 auto; overflow:visible; min-height:4.4em; font-size:14px}
+  .knob label{font-size:11px}
+  .knob input[type=range],.vol input[type=range]{height:28px; touch-action:pan-y}
+  .dip,.drop,.bank{font-size:11px}
+  /* в узкой колонке зоне файлов и подписи банка нужна своя строка, иначе от них остаётся многоточие */
+  .srow{flex-wrap:wrap}
+  .srow .drop,.srow .bank{flex:1 1 100%}
+  footer{font-size:11px}
+  #dump{width:min(560px,calc(100vw - 20px)); height:min(340px,60vh)}
+}
+
+/* --- телефон: одна колонка --- */
+@media (max-width:720px){
+  body{font-size:13px; letter-spacing:.02em}
+  #term{padding:5px; gap:5px}
+
+  /* шапка: три строки, кнопки не ниже 44 px */
+  .bar{gap:6px; padding:6px; align-items:stretch}
+  .bar h1{flex:1 1 100%; font-size:12px; line-height:1.3}
+  .chip{flex:1 1 auto; font-size:11px; padding:5px 8px; white-space:normal; display:flex; align-items:center}
+  .spacer{display:none}
+  .vol{flex:1 1 100%; font-size:11px; gap:8px}
+  .vol input[type=range]{flex:1; width:auto; height:32px}
+  .vol .val{min-width:38px; font-size:12px}
+  .radio{flex:1 1 100%; font-size:12px; min-height:44px; gap:8px}
+  .radio input{width:20px; height:20px}
+  .btn{flex:1 1 40%; min-height:44px; font-size:11px; padding:6px 8px; white-space:normal}
+  #textrow{flex-wrap:wrap; gap:6px}
+  #text{flex:1 1 100%; min-height:44px; font-size:15px; padding:6px 8px; letter-spacing:0}
+  #btn-line{flex:1 1 100%}
+
+  /* одна колонка карточек */
+  #cards{grid-template-columns:1fr; gap:6px}
+
+  /* карточка: портрет 56 px в строке с именем, остальное — во всю ширину.
+     display:contents у .body/.head распускает вложенность в одну сетку карточки. */
+  .card{
+    display:grid; grid-template-columns:56px minmax(0,1fr) auto;
+    column-gap:6px; row-gap:5px; padding:6px; align-items:center;
+  }
+  .card .body,.card .head{display:contents}
+  .card .pic{
+    grid-column:1; grid-row:1 / span 2; width:56px; height:56px; align-self:start;
+    border:1px solid var(--frame); border-right:1px solid var(--frame); padding:2px;
+  }
+  .card.playing .pic{border-color:var(--amber)}
+  .card .pic svg{height:100%; width:100%}
+  .card .head h2{grid-column:2; grid-row:1; align-self:end; font-size:13px; white-space:normal}
+  .card .head .rl{grid-column:2; grid-row:2; align-self:start; font-size:11px; white-space:normal; overflow:visible}
+  .card .play{grid-column:3; grid-row:1 / span 2; min-width:52px; min-height:52px; font-size:20px; padding:0}
+  .card .srcsw{grid-column:1 / -1; grid-row:3}
+  .card .waves{grid-column:1 / -1; grid-row:4}
+  .card .dip.cons{grid-column:1 / -1; grid-row:5; min-height:44px; font-size:12px}
+  .card .out{grid-column:1 / -1; grid-row:6; min-height:4.4em; padding:6px 8px}
+  .card .knobs.osc{grid-column:1 / -1; grid-row:7}
+  .card .smp{grid-column:1 / -1; grid-row:8}
+
+  /* переключатель источника и формы волны — во всю ширину, каждая кнопка не меньше 44 px */
+  .srcsw,.waves{width:100%}
+  .sw,.wv{flex:1 1 0; min-width:44px; min-height:44px; font-size:12px; padding:4px 2px}
+
+  /* ползунки: по два в ряд, подпись и значение над самим ползунком */
+  .knobs,.knobs.sm{grid-template-columns:repeat(2,1fr); gap:5px; padding:0; border-top:none}
+  .knob{padding:3px 6px 2px}
+  .knob label{font-size:11px; letter-spacing:.02em}
+  .knob .val{font-size:12px}
+  /* touch-action:pan-y — вертикальный скролл остаётся у страницы, ползунок берёт только горизонталь */
+  .knob input[type=range],.vol input[type=range]{height:32px; touch-action:pan-y}
+  .dip{min-height:44px; font-size:12px}
+  .dip input{width:20px; height:20px}
+
+  /* drag&drop на телефоне нет — зона превращается в кнопку выбора файлов */
+  .srow{flex-wrap:wrap; gap:6px; padding:0}
+  .srow .dip{flex:1 1 100%}
+  .drop{
+    flex:1 1 100%; min-height:44px; display:flex; align-items:center; justify-content:center;
+    border-style:solid; background:#08383a; color:var(--glow); font-size:12px; white-space:normal;
+  }
+  .drop .desk{display:none}
+  .drop .mob{display:inline}
+  .bank{flex:1 1 100%; font-size:11px; white-space:normal}
+
+  /* подвал сворачивается: описание на телефоне съедало бы экран */
+  footer{font-size:12px; padding:0}
+  footer summary{
+    display:block; padding:10px 8px; min-height:44px; cursor:pointer; color:var(--frame);
+    text-transform:uppercase; letter-spacing:.1em; font-size:12px;
+  }
+  footer #foot{padding:0 8px 8px}
+}
 </style>
 </head>
 <body>
@@ -157,7 +273,12 @@ footer b{color:var(--frame); font-weight:400}
 
   <div id="cards"></div>
 
-  <footer id="foot"></footer>
+  <footer>
+    <details id="foot-d" open>
+      <summary>Как это устроено ▾</summary>
+      <div id="foot"></div>
+    </details>
+  </footer>
 </div>
 
 <textarea id="dump" hidden spellcheck="false"></textarea>
@@ -546,8 +667,11 @@ async function play(charId, text){
   const p = presets[ch.id];
   if (text === undefined || text === null || String(text).trim() === '') text = ch.line;
   text = String(text);
+  // Контекст создаётся и будится синхронно, в том же стеке, что и жест: любой await или таймер
+  // до resume() отвязал бы вызов от жеста, и iOS/Android оставили бы контекст спящим.
   ensureCtx();
-  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) {} }
+  if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) {} }
+  setChip();                                   // не проснулся — видно в шапке, а не молча тишина
   const smp = p.source === 'samples';
   if (smp) await ensureBanks();        // декодируем до отсчёта времени, иначе старт уехал бы в прошлое
   const tl = timeline(text, p.charMs, p.pauseMul);
@@ -662,7 +786,8 @@ function renderCards(){
       +     '<div class="srow">'
       +       '<label class="dip"><input type="checkbox" id="ks-' + c.id + '-cut" data-id="' + c.id + '" data-k="cut">Обрезать пред.</label>'
       +       '<label class="drop" data-drop="' + c.id + '" title="wav / ogg / mp3, до 6 файлов. Сэмплы Aurelia: C:/Program Files (x86)/Steam/steamapps/common/Aurelia/so_*.ogg">'
-      +         'Перетащите 1–6 файлов wav/ogg/mp3'
+      +         '<span class="desk">Перетащите 1–6 файлов wav/ogg/mp3</span>'
+      +         '<span class="mob">Выбрать файлы</span>'
       +         '<input type="file" multiple accept="audio/*,.wav,.ogg,.mp3" data-file="' + c.id + '">'
       +       '</label>'
       +       '<span class="bank" id="bank-' + c.id + '"></span>'
@@ -672,6 +797,16 @@ function renderCards(){
       + '</div>');
     box.appendChild(card);
   }
+
+  // Самый ранний жест по ▶: будим контекст уже на pointerdown, до всякого click и без таймеров между.
+  box.addEventListener('pointerdown', function(e){
+    if (!e.target.closest('.play')) return;
+    ensureCtx();
+    if (ctx.state !== 'running') {
+      try { const pr = ctx.resume(); if (pr && pr.catch) pr.catch(function(){}); } catch (e2) {}
+    }
+    setChip();
+  });
 
   box.addEventListener('click', function(e){
     const play2 = e.target.closest('.play');
@@ -713,10 +848,21 @@ function renderCards(){
   }
 }
 
+/**
+ * Индикатор контекста. Отдельная ветка для «не running после жеста»: на iOS Safari
+ * AudioContext остаётся suspended/interrupted даже после resume(), и молчащая страница
+ * выглядит как поломка. Пишем прямо, что делать.
+ */
 function setChip(){
   const c = document.getElementById('chip-ctx');
-  c.textContent = 'AUDIO: ' + (ctx ? ctx.state.toUpperCase() + (playing ? ' / ' + playing.toUpperCase() : '') : 'IDLE');
-  c.className = 'chip' + (ctx && ctx.state === 'running' ? ' on' : '');
+  if (!ctx) { c.textContent = 'AUDIO: IDLE'; c.className = 'chip'; return; }
+  if (ctx.state === 'running') {
+    c.textContent = 'AUDIO: RUNNING' + (playing ? ' / ' + playing.toUpperCase() : '');
+    c.className = 'chip on';
+    return;
+  }
+  c.textContent = 'AUDIO: ' + ctx.state.toUpperCase() + ' — нажмите ▶ ещё раз';
+  c.className = 'chip warn';
 }
 
 function syncUI(){
@@ -760,6 +906,13 @@ function syncUI(){
   setChip();
 }
 
+/** Подвал: на широком экране развёрнут (заголовок скрыт стилями), на телефоне свёрнут в «как это устроено». */
+const FOOT_MQ = '(min-width: 721px)';
+function syncFoot(){
+  const d = document.getElementById('foot-d');
+  if (d) d.open = window.matchMedia(FOOT_MQ).matches;
+}
+
 function init(){
   renderCards();
 
@@ -795,6 +948,10 @@ function init(){
     + 'Сэмплы Aurelia лежат в <b>C:/Program Files (x86)/Steam/steamapps/common/Aurelia/so_*.ogg</b> — чужой ассет, в страницу не вшит. '
     + 'Темп печати, паузы, вопрос и НЧ-фильтр общие для источников. Мастер −12 дБ, «радиолиния» — highpass 300 + lowpass 3400. '
     + 'Печать — как в плеере (<b>web/player/src/dialogue/Line.tsx</b>), таймлайн общий со звуком. Сборка ' + BUILD.date + '.';
+
+  syncFoot();
+  try { window.matchMedia(FOOT_MQ).addEventListener('change', syncFoot); }
+  catch (e) { try { window.matchMedia(FOOT_MQ).addListener(syncFoot); } catch (e2) {} }
 
   syncUI();
 

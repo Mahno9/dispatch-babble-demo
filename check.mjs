@@ -14,9 +14,15 @@
  * переключатель прячет ползунки неактивного источника, play() создаёт ровно
  * ceil(символов / everyN) нод AudioBufferSourceNode, их playbackRate лежит
  * в [pitchMin, pitchMax], банк подменяется своими файлами.
+ *
+ * Отдельный прогон — мобильная раскладка (Emulation.setDeviceMetricsOverride,
+ * 390×844 и 360×740, mobile:true): страница не едет вбок, тач-цели не мельче
+ * 44×44 px, подписи не мельче 11 px, портрет не крупнее 64 px, подвал свёрнут
+ * в <details> и раскрывается, звук и печать работают так же, как на десктопе.
+ * В конце пишутся screenshot.png (1440×900) и screenshot-mobile.png (390×полная высота).
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -621,6 +627,214 @@ ok('после сброса источник снова «осциллятор»
   && back.kinds.join(',') === 'OscillatorNode',
   'источники ' + back.sources.join('/') + ', осцилляторов ' + back.events + ' при ' + back.letters
   + ' буквах, нод ' + back.nodes + ' (' + back.kinds.join(',') + ')');
+
+/* ================= мобильная раскладка ================= */
+/* Ширины двух самых узких ходовых экранов; deviceScaleFactor 3 и mobile:true — чтобы
+   работали медиазапросы и виртуальный вьюпорт, как на настоящем телефоне. */
+const VIEWPORTS = [
+  { name: '390×844', w: 390, h: 844 },
+  { name: '360×740', w: 360, h: 740 },
+];
+const MOBILE_PROBE = `(async () => {
+  const b = window.__babble;
+  b.reset();                                  // стартовые пресеты: осциллятор, кнопки волн видны
+  const iw = window.innerWidth;
+  const rect = (e) => e.getBoundingClientRect();
+  const shown = (e) => { const r = rect(e); return r.width > 0 && r.height > 0; };
+  const HTMLNS = 'http://www.w3.org/1999/xhtml';
+  // за правый край смотрим только по html-элементам: внутренние узлы вшитых SVG-портретов
+  // обрезаны своим .pic, их собственные рамки к раскладке страницы отношения не имеют
+  const outside = () => [...document.querySelectorAll('body *')]
+    .filter(e => e.namespaceURI === HTMLNS && shown(e) && rect(e).right > iw + 1)
+    .map(e => e.tagName.toLowerCase() + '.' + String(e.className || '').trim().split(/\\s+/)[0]
+              + '@' + Math.round(rect(e).right))
+    .slice(0, 6);
+  const tooSmall = (sel) => [...document.querySelectorAll(sel)].filter(shown)
+    .map(e => ({ id: (e.dataset.src || e.dataset.w || e.className.split(' ')[0]),
+                 w: Math.round(rect(e).width), h: Math.round(rect(e).height) }))
+    .filter(t => Math.min(t.w, t.h) < 44)
+    .map(t => t.id + ' ' + t.w + '×' + t.h);
+
+  const osc = {
+    scrollW: document.documentElement.scrollWidth,
+    bodyScrollW: document.body.scrollWidth,
+    small: tooSmall('.card .play, .card .sw, .card .wv'),
+    targets: [...document.querySelectorAll('.card .play, .card .sw, .card .wv')].filter(shown).length,
+    outside: outside(),
+    labelMin: Math.min(...[...document.querySelectorAll('.card .knob label, .card .head .rl, .chip')]
+      .filter(shown).map(e => parseFloat(getComputedStyle(e).fontSize))),
+    bodyFont: parseFloat(getComputedStyle(document.body).fontSize),
+    picMax: Math.max(...[...document.querySelectorAll('.card .pic')]
+      .map(e => Math.max(rect(e).width, rect(e).height))),
+    rangeMinH: Math.min(...[...document.querySelectorAll('.card .knob input[type=range]')]
+      .filter(shown).map(e => Math.round(rect(e).height))),
+    touchAction: [...new Set([...document.querySelectorAll('input[type=range]')]
+      .map(e => getComputedStyle(e).touchAction))].join(','),
+    cardsPerRow: (() => {
+      const tops = [...document.querySelectorAll('.card')].map(c => Math.round(rect(c).top));
+      return tops.filter(t => t === tops[0]).length;         // одна колонка → 1
+    })(),
+    outMinH: Math.min(...[...document.querySelectorAll('.card .out')].map(e => Math.round(rect(e).height))),
+    outClipped: [...document.querySelectorAll('.card .out')].filter(o => o.scrollHeight - o.clientHeight > 1).length
+  };
+
+  // режим сэмплов: появляется кнопка выбора файлов и второй набор ползунков
+  for (const c of b.CHARS) b.presets[c.id].source = 'samples';
+  document.getElementById('k-vol').dispatchEvent(new Event('input', { bubbles: true }));
+  const smp = {
+    scrollW: document.documentElement.scrollWidth,
+    small: tooSmall('.card .play, .card .sw, .card .drop'),
+    outside: outside(),
+    dropText: (document.querySelector('.card .drop') || {}).textContent,
+    dropMobShown: [...document.querySelectorAll('.card .drop .mob')].filter(shown).length,
+    dropDeskShown: [...document.querySelectorAll('.card .drop .desk')].filter(shown).length,
+    labelMin: Math.min(...[...document.querySelectorAll('.card .knobs.sm .knob label')]
+      .filter(shown).map(e => parseFloat(getComputedStyle(e).fontSize)))
+  };
+  b.reset();
+
+  // Подвал: свёрнут в <details>, раскрывается по нажатию на заголовок. Меряем сам <footer>:
+  // у закрытого details содержимое остаётся размеченным (content-visibility), и его собственный
+  // getBoundingClientRect соврал бы — а высота подвала на экране честная.
+  const d = document.getElementById('foot-d');
+  const sum = d.querySelector('summary');
+  const footEl = document.querySelector('footer');
+  const foot = {
+    closed: d.open === false,
+    sumH: Math.round(rect(sum).height),
+    hClosed: Math.round(rect(footEl).height),
+    pageClosed: document.documentElement.scrollHeight
+  };
+  sum.click();
+  foot.opened = d.open === true;
+  foot.hOpen = Math.round(rect(footEl).height);
+  foot.pageOpen = document.documentElement.scrollHeight;
+  sum.click();
+  foot.closedAgain = d.open === false;
+
+  // звук и печать: то же самое, что на десктопе
+  const r = await b.play('54', 'Проверка на телефоне.');
+  await new Promise(res => setTimeout(res, r.durationMs + 400));
+  const play = {
+    events: r.events, chars: r.chars, source: r.source, ctxState: r.ctxState,
+    typed: document.querySelector('.card[data-id="54"] .said').textContent.length,
+    chip: document.getElementById('chip-ctx').textContent
+  };
+  b.stop();
+  return JSON.stringify({ iw: iw, ih: window.innerHeight, osc: osc, smp: smp, foot: foot, play: play });
+})()`;
+
+for (const vp of VIEWPORTS) {
+  await send('Emulation.setDeviceMetricsOverride',
+    { width: vp.w, height: vp.h, deviceScaleFactor: 3, mobile: true });
+  await sleep(500);
+  const m = await evalJs(MOBILE_PROBE);
+
+  ok('нет горизонтальной прокрутки, всё внутри экрана (' + vp.name + ')',
+    m.iw === vp.w && m.osc.scrollW <= m.iw && m.smp.scrollW <= m.iw && m.osc.bodyScrollW <= m.iw
+    && m.osc.outside.length === 0 && m.smp.outside.length === 0 && m.osc.cardsPerRow === 1,
+    'scrollWidth ' + m.osc.scrollW + ' (сэмплы ' + m.smp.scrollW + ') при innerWidth ' + m.iw
+    + ', карточек в ряду ' + m.osc.cardsPerRow
+    + ', за правым краем: ' + (m.osc.outside.concat(m.smp.outside).join(', ') || 'ничего'));
+
+  ok('тач-цели ≥44 px, кегль ≥13/11 px, портрет ≤64 px (' + vp.name + ')',
+    m.osc.small.length === 0 && m.smp.small.length === 0 && m.osc.targets >= 24
+    && m.osc.bodyFont >= 13 && m.osc.labelMin >= 11 && m.smp.labelMin >= 11
+    && m.osc.picMax <= 64 && m.osc.rangeMinH >= 32 && m.osc.touchAction === 'pan-y'
+    && m.osc.outMinH >= 3 * 14 && m.osc.outClipped === 0,
+    'мелких целей ' + (m.osc.small.concat(m.smp.small).join(', ') || 'нет') + ' из ' + m.osc.targets
+    + ', база ' + m.osc.bodyFont + ' px, мин. подпись ' + m.osc.labelMin + ' px, портрет '
+    + Math.round(m.osc.picMax) + ' px, ползунок ' + m.osc.rangeMinH + ' px (touch-action: '
+    + m.osc.touchAction + '), реплика ' + m.osc.outMinH + ' px, обрезано ' + m.osc.outClipped);
+
+  ok('подвал свёрнут и раскрывается, «выбрать файлы» вместо перетаскивания, play() и печать идут (' + vp.name + ')',
+    m.foot.closed && m.foot.opened && m.foot.closedAgain && m.foot.sumH >= 44
+    && m.foot.hClosed <= m.foot.sumH + 4 && m.foot.hOpen > m.foot.hClosed + 100
+    && m.foot.pageOpen > m.foot.pageClosed + 100
+    && m.smp.dropMobShown === 4 && m.smp.dropDeskShown === 0
+    && m.play.events > 0 && m.play.typed === m.play.chars && m.play.ctxState === 'running'
+    && /RUNNING/.test(m.play.chip),
+    'подвал: закрыт ' + m.foot.closed + ' (' + m.foot.hClosed + ' px, страница ' + m.foot.pageClosed
+    + ') → открыт ' + m.foot.opened + ' (' + m.foot.hOpen + ' px, страница ' + m.foot.pageOpen
+    + '), заголовок ' + m.foot.sumH + ' px; зона файлов «' + String(m.smp.dropText).trim()
+    + '» (видна «Выбрать файлы» ×' + m.smp.dropMobShown + ', «Перетащите» ×' + m.smp.dropDeskShown
+    + '); play: ' + m.play.events + ' нот, напечатано '
+    + m.play.typed + '/' + m.play.chars + ', шапка «' + m.play.chip + '»');
+}
+
+/* --- промежуточные ширины: до 720 одна колонка, 721–1100 две, и нигде нет горизонтальной прокрутки --- */
+const SWEEP = [
+  { w: 414, h: 896, cols: 1 }, { w: 480, h: 800, cols: 1 }, { w: 600, h: 900, cols: 1 },
+  { w: 720, h: 900, cols: 1 }, { w: 768, h: 1024, cols: 2 }, { w: 1024, h: 768, cols: 2 },
+  { w: 1100, h: 800, cols: 2 },
+];
+const sweepRows = [];
+let sweepPass = true;
+for (const s of SWEEP) {
+  await send('Emulation.setDeviceMetricsOverride',
+    { width: s.w, height: s.h, deviceScaleFactor: 2, mobile: s.w <= 720 });
+  await sleep(250);
+  const r = await evalJs(`(() => {
+    const rect = (e) => e.getBoundingClientRect();
+    const iw = window.innerWidth;
+    const tops = [...document.querySelectorAll('.card')].map(c => Math.round(rect(c).top));
+    return JSON.stringify({
+      iw: iw, scrollW: document.documentElement.scrollWidth,
+      cols: tops.filter(t => t === tops[0]).length,
+      outside: [...document.querySelectorAll('body *')]
+        .filter(e => e.namespaceURI === 'http://www.w3.org/1999/xhtml'
+          && rect(e).width > 0 && rect(e).height > 0 && rect(e).right > iw + 1)
+        .map(e => e.tagName.toLowerCase() + '.' + String(e.className || '').trim().split(/\\s+/)[0]).slice(0, 4)
+    });
+  })()`);
+  const good = r.iw === s.w && r.scrollW <= r.iw && r.cols === s.cols && r.outside.length === 0;
+  if (!good) sweepPass = false;
+  sweepRows.push(s.w + ': ' + r.scrollW + '/' + r.iw + ' px, колонок ' + r.cols
+    + (r.outside.length ? ', ЗА КРАЕМ ' + r.outside.join(',') : ''));
+}
+ok('на промежуточных ширинах прокрутки вбок нет, колонок 1 до 720 px и 2 до 1100 px',
+  sweepPass, sweepRows.join(' | '));
+
+/* --- скриншоты: десктоп и телефон целиком --- */
+await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+await sleep(400);
+await evalJs(`(async () => {
+  const b = window.__babble;
+  b.reset();
+  for (const cid of ['58','57']) document.querySelector('.card[data-id="' + cid + '"] .sw[data-src="samples"]').click();
+  await b.ensureBanks();
+  await b.play('58', 'Хранилище смотришь?');
+  await new Promise(r => setTimeout(r, 380));
+  return "0";
+})()`);
+const deskShot = await send('Page.captureScreenshot',
+  { format: 'png', clip: { x: 0, y: 0, width: 1440, height: 900, scale: 1 } });
+writeFileSync(join(DIR, 'screenshot.png'), Buffer.from(deskShot.result.data, 'base64'));
+
+await evalJs('(window.__babble.stop(), "0")');
+await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+await sleep(500);
+const mobPrep = await evalJs(`(async () => {
+  const b = window.__babble;
+  b.reset();
+  document.querySelector('.card[data-id="57"] .sw[data-src="samples"]').click();
+  await b.ensureBanks();
+  await b.play('58', 'Хранилище смотришь?');
+  await new Promise(r => setTimeout(r, 380));
+  return JSON.stringify({ h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth });
+})()`);
+const mobShot = await send('Page.captureScreenshot', {
+  format: 'png', captureBeyondViewport: true,
+  clip: { x: 0, y: 0, width: 390, height: Math.min(mobPrep.h, 6000), scale: 1 },
+});
+writeFileSync(join(DIR, 'screenshot-mobile.png'), Buffer.from(mobShot.result.data, 'base64'));
+await evalJs('(window.__babble.stop(), "0")');
+
+const shots = ['screenshot.png', 'screenshot-mobile.png'].map((f) => ({ f, size: statSync(join(DIR, f)).size }));
+ok('скриншоты записаны: 1440×900 и 390×' + mobPrep.h + ' целиком',
+  shots.every((s) => s.size > 20000) && mobPrep.h > 844 && mobPrep.w <= 390,
+  shots.map((s) => s.f + ' ' + (s.size / 1024).toFixed(0) + ' КБ').join(', ')
+  + '; высота мобильной страницы ' + mobPrep.h + ' px при ширине ' + mobPrep.w);
 
 /* --- 17. консоль --- */
 ok('нет ошибок в консоли', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' ; ') || '—');
