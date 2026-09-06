@@ -12,11 +12,14 @@
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}
-html,body{height:100%}
+html,body{min-height:100%}
 body{
   margin:0; background:var(--bg); color:var(--text);
   font-family:"IBM Plex Mono","Share Tech Mono",Consolas,"Courier New",monospace;
-  font-size:12px; letter-spacing:.04em; overflow:hidden;
+  font-size:12px; letter-spacing:.04em;
+  /* 11 карточек в один экран не влезают: страница прокручивается вертикально на любой ширине,
+     вбок — никогда (иначе часть ползунков уезжает за край и до них не добраться) */
+  overflow-x:hidden;
 }
 .crt-overlay{
   pointer-events:none; position:fixed; inset:0; z-index:9999;
@@ -25,11 +28,12 @@ body{
   opacity:.7;
 }
 #term{
-  height:100vh; padding:6px; display:flex; flex-direction:column; gap:6px;
+  min-height:100vh; padding:6px; display:flex; flex-direction:column; gap:6px;
   border:1px solid #0d4a4c; background:linear-gradient(180deg,#041416,#030B0C);
 }
+/* flex-wrap на любой ширине: кнопок в шапке шесть, и на 1100–1300 px они уезжали за правый край. */
 .bar{
-  display:flex; align-items:center; gap:10px; padding:4px 8px;
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px; row-gap:6px; padding:4px 8px;
   background:var(--term); border:1px solid #10484a; border-left:3px solid var(--teal);
 }
 .bar h1{margin:0; font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--glow); font-weight:700}
@@ -47,7 +51,12 @@ body{
 .radio{display:flex; align-items:center; gap:4px; color:var(--mute); font-size:9px; text-transform:uppercase; letter-spacing:.1em; cursor:pointer}
 .radio input{accent-color:var(--orange); width:12px; height:12px; margin:0}
 
-#textrow{display:flex; gap:6px; align-items:stretch}
+/* Поле текста едет со скроллом: карточек одиннадцать, набирать реплику приходится,
+   докрутив до нужного персонажа. Липкая шапка целиком съела бы половину экрана. */
+#textrow{
+  display:flex; gap:6px; align-items:stretch;
+  position:sticky; top:0; z-index:20; background:var(--bg); padding:4px 0;
+}
 #text{
   flex:1; background:#04191a; color:var(--text); border:1px solid #14514f;
   font-family:inherit; font-size:12px; letter-spacing:.03em; padding:3px 6px; outline:none;
@@ -64,8 +73,11 @@ body{
 .btn.stop{color:var(--orange); border-color:#7a3a1e}
 .btn.stop:hover{border-color:var(--orange); background:#3a1c0c}
 
-/* --- карточки персонажей --- */
-#cards{flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:6px}
+/* --- карточки персонажей ---
+   minmax(0,1fr): без него колонка растягивается по min-content шапки и страница едет вбок. */
+/* align-items:start, а не растягивание по ряду: иначе свёрнутая карточка сохраняла бы
+   высоту самой высокой соседки и сворачивание не давало бы никакого выигрыша. */
+#cards{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; align-content:start; align-items:start}
 .card{
   display:flex; min-height:0; background:var(--term); border:1px solid #10484a;
   transition:border-color 140ms;
@@ -76,13 +88,35 @@ body{
   background:#04191a; border-right:1px solid var(--frame); overflow:hidden;
 }
 .card.playing .pic{border-right-color:var(--amber)}
-.card .pic svg{max-height:100%; max-width:100%; height:100%; width:auto; display:block; filter:saturate(.75)}
+/* Портрет вписывается в колонку целиком: при height:100% квадратный SVG растягивался по высоте
+   карточки, а колонка в 86 px срезала лицо — на странице отбора персонажа надо узнавать. */
+.card .pic svg{max-height:100%; max-width:100%; width:100%; height:auto; display:block; filter:saturate(.75)}
 .card .pic .noimg{color:var(--mute); font-size:22px; letter-spacing:.2em}
 .card .body{flex:1; min-width:0; display:flex; flex-direction:column}
-.card .head{display:flex; align-items:center; gap:8px; padding:3px 6px; background:#0a3132; border-bottom:1px solid #0f4a4a}
+/* В колонке шириной ~470 px (три в ряд на 1440) кнопки волн и галка в одну строку с именем не влезают:
+   шапка переносится, а .spacer в базисе 100% делает перенос предсказуемым — имя сверху, органы ниже. */
+.card .head{display:flex; flex-wrap:wrap; align-items:center; gap:8px; row-gap:4px; padding:3px 6px; background:#0a3132; border-bottom:1px solid #0f4a4a}
+.card .head .spacer{flex:0 0 100%; height:0}
 .card .head h2{margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--glow); font-weight:700; white-space:nowrap}
 .card.playing .head h2{color:var(--amber)}
-.card .head .rl{font-size:9px; color:var(--mute); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.card .head .rl{flex:1 1 40px; min-width:0; font-size:9px; color:var(--mute); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+
+/* --- свёрнутая карточка: одна строка «портрет 40 · имя · ▶ · осц/сэмпл · сводка» ---
+   flex-wrap:nowrap вместо переноса: имя и сводка ужимаются многоточием, строка остаётся одна. */
+.card .sum{display:none}
+.card .col{padding:2px 7px; min-width:24px; text-align:center}
+.card.collapsed .head{flex-wrap:nowrap; border-bottom:none}
+.card.collapsed .head .spacer{display:none}
+.card.collapsed .head h2{flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
+.card.collapsed .sum{
+  display:block; flex:1 1 40px; min-width:0; font-size:9px; color:var(--frame);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+/* max-height вместе с min-height: у портретов разное соотношение сторон, и без потолка
+   вытянутый SVG (oleg — 120×160) сделал бы «одну строку» в полтора раза выше. */
+.card.collapsed .pic{flex:0 0 40px; min-height:40px; max-height:40px}
+.card.collapsed .rl,.card.collapsed .waves,.card.collapsed .dip.cons,
+.card.collapsed .out,.card.collapsed .knobs,.card.collapsed .smp{display:none !important}
 .waves,.srcsw{display:flex; gap:0}
 .wv,.sw{
   background:#062a2b; color:var(--mute); border:1px solid #14514f; border-right:none; padding:2px 5px;
@@ -92,8 +126,9 @@ body{
 .wv:hover,.sw:hover{color:var(--glow)}
 .wv.on{background:#0d3f3d; color:var(--amber); border-color:var(--amber)}
 .sw.on{background:#0d3f3d; color:var(--orange); border-color:var(--orange)}
+/* Высота по содержимому: обрезать реплику нечем — страница прокручивается. */
 .card .out{
-  flex:1; min-height:0; padding:4px 8px; overflow:hidden; color:var(--text); font-size:13px; line-height:1.4;
+  flex:0 0 auto; min-height:4.4em; padding:4px 8px; overflow:visible; color:var(--text); font-size:13px; line-height:1.4;
   background:linear-gradient(180deg,#04191a,#052224);
 }
 .card .out .said{white-space:pre-wrap}
@@ -139,25 +174,21 @@ footer summary{display:none}
 #dump[hidden]{display:none}
 
 /* ==================== адаптив ====================
-   Десктоп (шире 1100 px) не трогаем: страница по-прежнему целиком в одном экране, без прокрутки.
-   Узкий экран — обратная логика: прокрутка страницы разрешена, карточки растут по содержимому,
-   кегль поднимается до читаемого, тач-цели — не меньше 44×44 px (WCAG 2.5.5). */
+   Прокрутка страницы разрешена везде: одиннадцать карточек в экран не помещаются.
+   Меняется только число колонок — 3 на десктопе, 2 на планшете, 1 на телефоне —
+   и на узком экране кегль поднимается до читаемого, тач-цели — не меньше 44×44 px (WCAG 2.5.5). */
 
-/* --- планшет и узкое окно: две колонки, страница прокручивается --- */
+/* --- планшет и узкое окно: две колонки --- */
 @media (max-width:1100px){
-  html,body{height:auto; min-height:100%}
-  body{overflow:visible; font-size:13px}
-  #term{height:auto; min-height:100vh}
-  /* minmax(0,1fr): иначе колонка растягивается по min-content шапки карточки и страница едет вбок */
-  #cards{flex:none; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:auto; align-content:start}
+  body{font-size:13px}
+  #cards{grid-template-columns:repeat(2,minmax(0,1fr))}
   .bar{flex-wrap:wrap}
   .card{min-height:0; min-width:0}
   .card .body{min-width:0}
-  .card .head{flex-wrap:wrap; row-gap:4px}
   .card .head h2,.card .head .rl{white-space:normal}
+  .card.collapsed .head h2{white-space:nowrap}
   .knobs,.knobs.sm{grid-template-columns:repeat(2,1fr)}
-  /* высота по содержимому: обрезать текст нечем — страница прокручивается */
-  .card .out{flex:0 0 auto; overflow:visible; min-height:4.4em; font-size:14px}
+  .card .out{font-size:14px}
   .knob label{font-size:11px}
   .knob input[type=range],.vol input[type=range]{height:28px; touch-action:pan-y}
   .dip,.drop,.bank{font-size:11px}
@@ -194,7 +225,7 @@ footer summary{display:none}
   /* карточка: портрет 56 px в строке с именем, остальное — во всю ширину.
      display:contents у .body/.head распускает вложенность в одну сетку карточки. */
   .card{
-    display:grid; grid-template-columns:56px minmax(0,1fr) auto;
+    display:grid; grid-template-columns:56px minmax(0,1fr) auto auto;
     column-gap:6px; row-gap:5px; padding:6px; align-items:center;
   }
   .card .body,.card .head{display:contents}
@@ -207,6 +238,10 @@ footer summary{display:none}
   .card .head h2{grid-column:2; grid-row:1; align-self:end; font-size:13px; white-space:normal}
   .card .head .rl{grid-column:2; grid-row:2; align-self:start; font-size:11px; white-space:normal; overflow:visible}
   .card .play{grid-column:3; grid-row:1 / span 2; min-width:52px; min-height:52px; font-size:20px; padding:0}
+  .card .col{grid-column:4; grid-row:1 / span 2; min-width:44px; min-height:44px; font-size:16px; padding:0}
+  /* свёрнутая карточка на телефоне: портрет 40, имя и сводка справа от него, ниже — осц/сэмпл */
+  .card.collapsed .pic{width:40px; height:40px}
+  .card.collapsed .sum{grid-column:2; grid-row:2; align-self:start; font-size:11px}
   .card .srcsw{grid-column:1 / -1; grid-row:3}
   .card .waves{grid-column:1 / -1; grid-row:4}
   .card .dip.cons{grid-column:1 / -1; grid-row:5; min-height:44px; font-size:12px}
@@ -261,6 +296,8 @@ footer summary{display:none}
       <input type="range" id="k-vol" min="0" max="1" step="0.01" value="1">
       <span class="val" id="v-vol">100%</span></span>
     <label class="radio"><input type="checkbox" id="k-radio">Радиолиния 300–3400</label>
+    <button class="btn" id="btn-collapse">Свернуть все</button>
+    <button class="btn" id="btn-expand">Развернуть все</button>
     <button class="btn" id="btn-copy">Скопировать пресеты</button>
     <button class="btn" id="btn-reset">Сброс к стартовым</button>
     <button class="btn stop" id="btn-stop">Стоп</button>
@@ -296,25 +333,50 @@ const HUMS = /*__HUMS__*/ {};
    и сэмплы «как в Aurelia» — короткое записанное «мх» на каждый N-й символ.
    Стартовый источник у всех — осциллятор: это отобранный ранее вариант, сэмплы включаются кнопкой. */
 const CHARS = [
-  { id:'58',   name:'Чейз Альбертович', role:'диспетчер на пенсии, неспешный', line:'Хранилище смотришь?' },
-  { id:'54',   name:'Блонде Блейзер',   role:'молодая, звонкая, быстрая',
+  { id:'oleg', name:'Олег (диспетчер)',  role:'усталый, ровный, средний',        line:'Диспетчерская, слушаю.' },
+  { id:'53',   name:'Генадий Фламбэ',    role:'сиплый ворчливый ветеран',        line:'Не выдумывай. Он прос-сто ос-стыл.' },
+  { id:'54',   name:'Блонде Блейзер',    role:'молодая, звонкая, быстрая',
     line:'Диспетчер, вопрос вне эфира. Вы разговариваете со мной чаще, чем с остальными.' },
-  { id:'57',   name:'Громила Жёсткий',  role:'огромный, виноватый, с паузами', line:'Диспетчер. Тут... ручка.' },
-  { id:'oleg', name:'Олег (диспетчер)', role:'усталый, ровный, средний',       line:'Диспетчерская, слушаю.' },
+  { id:'55',   name:'Хуёво Видия',       role:'тихая невидимка, ровная',         line:'Держу. Как всегда. Незаметно для окружающих.' },
+  { id:'56',   name:'Малевола',          role:'холодная, по пунктам протокола',  line:'Открыто. Для протокола: я не прикасалась.' },
+  { id:'57',   name:'Громила Жёсткий',   role:'огромный, виноватый, с паузами',  line:'Диспетчер. Тут... ручка.' },
+  { id:'58',   name:'Чейз Альбертович',  role:'диспетчер на пенсии, неспешный',  line:'Хранилище смотришь?' },
+  { id:'59',   name:'Коуп Иум',          role:'новичок, тараторит, самоуверен',  line:'Принято. Всё под контролем. У обоих.' },
+  { id:'60',   name:'Просто Гален',      role:'полевой медик, ровный, спокойный',line:'Плёнка, осадок, запах жжёной изоляции. Я констатирую.' },
+  { id:'61',   name:'Феномачо',          role:'вялый, вздыхает, медленный',      line:'Завидую. У них хоть видно, что горит.' },
+  { id:'62',   name:'Замзам',            role:'гнусавый чиновник, фразы-слайды', line:'Смена не принята. В очереди несоответствия.' },
 ];
 
-/** Чей встроенный банк слушает персонаж. У 57 и oleg своего нет — берут банк Чейза со сдвигом питча. */
-const BANK_OF = { '58':'58', '54':'54', '57':'58', 'oleg':'58' };
+/** Чей встроенный банк слушает персонаж. Свои «мх» есть только у 58 и 54 — остальные берут банк Чейза со сдвигом питча. */
+const BANK_OF = { '58':'58', '54':'54', '53':'58', '55':'58', '56':'58', '57':'58',
+                  '59':'58', '60':'58', '61':'58', '62':'58', 'oleg':'58' };
 
+/* Пресеты 54, 57 и 58 отобраны разработчиком на слух 2026-09-05 — их менять только по новому отбору.
+   Остальные — прикидка по voiceNote из casting.json в той же шкале: характер выражается прежде всего
+   темпом печати и длиной блипа, а не одной высотой. */
 const DEFAULTS = {
-  '58':   { source:'osc', wave:'triangle', hz:130, jitter:3, charMs:22, blipMs:60,  decayMs:40, lowpass:2500, pauseMul:1,   questionMul:1.15, consonantDip:true,
+  'oleg': { source:'osc', wave:'triangle', hz:210, jitter:2, charMs:30, blipMs:50,  decayMs:35, lowpass:3000, pauseMul:1,   questionMul:1.2,  consonantDip:true,
             everyN:4, pitchMin:0.9,  pitchMax:1.05, sampleGain:-6, cut:false },
-  '54':   { source:'osc', wave:'triangle', hz:190, jitter:3, charMs:16, blipMs:55,  decayMs:38, lowpass:3000, pauseMul:1,   questionMul:1.15, consonantDip:true,
+  '53':   { source:'osc', wave:'sawtooth', hz:240, jitter:6, charMs:48, blipMs:80,  decayMs:30, lowpass:3800, pauseMul:1.2, questionMul:1.15, consonantDip:true,
+            everyN:4, pitchMin:0.85, pitchMax:1,    sampleGain:-6, cut:false },
+  '54':   { source:'osc', wave:'triangle', hz:365, jitter:4, charMs:33, blipMs:31,  decayMs:25, lowpass:7600, pauseMul:1,   questionMul:1.15, consonantDip:false,
             everyN:4, pitchMin:0.9,  pitchMax:1.05, sampleGain:-6, cut:false },
+  '55':   { source:'osc', wave:'sine',     hz:300, jitter:1, charMs:36, blipMs:40,  decayMs:60, lowpass:2600, pauseMul:1,   questionMul:1.05, consonantDip:false,
+            everyN:4, pitchMin:1,    pitchMax:1.2,  sampleGain:-6, cut:false },
+  '56':   { source:'osc', wave:'square',   hz:250, jitter:0, charMs:40, blipMs:45,  decayMs:15, lowpass:3200, pauseMul:1.5, questionMul:1.15, consonantDip:true,
+            everyN:4, pitchMin:1,    pitchMax:1.2,  sampleGain:-6, cut:false },
   '57':   { source:'osc', wave:'square',   hz:75,  jitter:4, charMs:45, blipMs:110, decayMs:80, lowpass:1200, pauseMul:1.3, questionMul:1.1,  consonantDip:true,
             everyN:4, pitchMin:0.7,  pitchMax:0.8,  sampleGain:-6, cut:false },
-  'oleg': { source:'osc', wave:'triangle', hz:150, jitter:3, charMs:24, blipMs:60,  decayMs:42, lowpass:2200, pauseMul:1,   questionMul:1.15, consonantDip:true,
-            everyN:4, pitchMin:0.95, pitchMax:1.1,  sampleGain:-6, cut:false },
+  '58':   { source:'osc', wave:'triangle', hz:273, jitter:3, charMs:57, blipMs:93,  decayMs:20, lowpass:4250, pauseMul:1,   questionMul:1.15, consonantDip:true,
+            everyN:5, pitchMin:0.85, pitchMax:1.27, sampleGain:-4, cut:true },
+  '59':   { source:'osc', wave:'triangle', hz:330, jitter:8, charMs:18, blipMs:28,  decayMs:20, lowpass:6000, pauseMul:1,   questionMul:1.25, consonantDip:false,
+            everyN:4, pitchMin:1,    pitchMax:1.2,  sampleGain:-6, cut:false },
+  '60':   { source:'osc', wave:'sine',     hz:220, jitter:2, charMs:30, blipMs:55,  decayMs:40, lowpass:3000, pauseMul:1.1, questionMul:1.15, consonantDip:true,
+            everyN:4, pitchMin:0.85, pitchMax:1,    sampleGain:-6, cut:false },
+  '61':   { source:'osc', wave:'triangle', hz:180, jitter:2, charMs:62, blipMs:120, decayMs:90, lowpass:1800, pauseMul:1.6, questionMul:1.05, consonantDip:true,
+            everyN:4, pitchMin:0.85, pitchMax:1,    sampleGain:-6, cut:false },
+  '62':   { source:'osc', wave:'square',   hz:290, jitter:1, charMs:28, blipMs:40,  decayMs:30, lowpass:2400, pauseMul:0.8, questionMul:1.15, consonantDip:false,
+            everyN:4, pitchMin:0.85, pitchMax:1,    sampleGain:-6, cut:false },
 };
 const FIELDS = ['source','wave','hz','jitter','charMs','blipMs','decayMs','lowpass','pauseMul','questionMul','consonantDip',
                 'everyN','pitchMin','pitchMax','sampleGain','cut'];
@@ -348,7 +410,8 @@ const KNOBS_SMP = [
 const LS = 'babble-demo-20260905-chip';
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const presets = clone(DEFAULTS);
-const ui = { vol:1, radio:false, lineIdx:0 };
+/** collapsed: { charId: true } — свёрнутые карточки. Пусто = все развёрнуты. */
+const ui = { vol:1, radio:false, lineIdx:0, collapsed:{} };
 
 /** Читаем только известные поля известных персонажей: чужой/старый JSON не должен ломать страницу. */
 function load(){
@@ -358,6 +421,9 @@ function load(){
   if (s.ui && typeof s.ui === 'object') {
     if (typeof s.ui.vol === 'number') ui.vol = Math.min(1, Math.max(0, s.ui.vol));
     if (typeof s.ui.radio === 'boolean') ui.radio = s.ui.radio;
+    if (s.ui.collapsed && typeof s.ui.collapsed === 'object') {
+      for (const c of CHARS) if (s.ui.collapsed[c.id] === true) ui.collapsed[c.id] = true;
+    }
   }
   if (!s.presets || typeof s.presets !== 'object') return;
   for (const c of CHARS) {
@@ -744,6 +810,24 @@ function resetPresets(){
 /* ---------------- интерфейс ---------------- */
 function el(html){ const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; }
 
+/* ---------------- сворачивание карточек ----------------
+   Одиннадцать развёрнутых карточек — это несколько экранов прокрутки. Свёрнутая карточка
+   остаётся одной строкой: портрет, имя, ▶, переключатель источника и сводка пресета —
+   этого хватает, чтобы прослушать персонажа, не разворачивая его. */
+function presetSummary(id){
+  const p = presets[id];
+  if (p.source === 'samples') return 'сэмпл ×' + p.everyN + ' · питч ' + p.pitchMin + '–' + p.pitchMax;
+  return p.wave.slice(0, 3) + ' ' + p.hz + ' Гц · ' + p.charMs + ' мс';
+}
+function setCollapsed(id, on){
+  if (on) ui.collapsed[id] = true; else delete ui.collapsed[id];
+  save(); syncUI();
+}
+function collapseAll(on){
+  for (const c of CHARS) { if (on) ui.collapsed[c.id] = true; else delete ui.collapsed[c.id]; }
+  save(); syncUI();
+}
+
 /** pfx: '' — ползунок осциллятора (k-…/v-…), 's' — ползунок сэмплов (ks-…/vs-…). */
 function knobHtml(pfx, cid, k){
   return '<div class="knob"><label>' + k.lab + ' <span class="val" id="v' + pfx + '-' + cid + '-' + k.k + '"></span></label>'
@@ -771,6 +855,7 @@ function renderCards(){
       +     '<button class="btn amber play" data-id="' + c.id + '">▶</button>'
       +     '<h2>' + c.name + '</h2>'
       +     '<span class="rl">' + c.role + '</span>'
+      +     '<span class="sum" id="sum-' + c.id + '"></span>'
       +     '<span class="spacer"></span>'
       +     '<div class="srcsw">'
       +       '<button class="sw" data-id="' + c.id + '" data-src="osc">осц</button>'
@@ -778,6 +863,7 @@ function renderCards(){
       +     '</div>'
       +     '<div class="waves">' + waves + '</div>'
       +     '<label class="dip cons"><input type="checkbox" id="k-' + c.id + '-consonantDip" data-id="' + c.id + '" data-k="consonantDip">Согласные ×0,85</label>'
+      +     '<button class="btn col" id="col-' + c.id + '" data-col="' + c.id + '" title="свернуть / развернуть">–</button>'
       +   '</div>'
       +   '<div class="out"><span class="said"></span><span class="cur off">&nbsp;</span><span class="rest"></span></div>'
       +   '<div class="knobs osc">' + knobs + '</div>'
@@ -819,6 +905,8 @@ function renderCards(){
       });
       return;
     }
+    const col = e.target.closest('.col');
+    if (col) { setCollapsed(col.dataset.col, !ui.collapsed[col.dataset.col]); return; }
     const sw = e.target.closest('.sw');
     if (sw) { presets[sw.dataset.id].source = sw.dataset.src; save(); syncUI(); return; }
     const wv = e.target.closest('.wv');
@@ -890,6 +978,12 @@ function syncUI(){
     const sws = document.querySelectorAll('.card[data-id="' + c.id + '"] .sw');
     for (const s of sws) s.classList.toggle('on', s.dataset.src === p.source);
     if (card) {
+      const off = ui.collapsed[c.id] === true;
+      card.classList.toggle('collapsed', off);
+      const sum = document.getElementById('sum-' + c.id);
+      if (sum) sum.textContent = presetSummary(c.id);
+      const colb = document.getElementById('col-' + c.id);
+      if (colb) { colb.textContent = off ? '+' : '–'; colb.setAttribute('aria-expanded', String(!off)); }
       // ползунки неактивного источника прячем целиком: карточка не растёт и шрифт не приходится мельчить
       const smp = p.source === 'samples';
       card.querySelector('.waves').hidden = smp;
@@ -924,6 +1018,8 @@ function init(){
     ta.value = CHARS[ui.lineIdx].line;
   });
   document.getElementById('btn-stop').addEventListener('click', function(){ stopAll(); setChip(); });
+  document.getElementById('btn-collapse').addEventListener('click', function(){ collapseAll(true); });
+  document.getElementById('btn-expand').addEventListener('click', function(){ collapseAll(false); });
   document.getElementById('btn-copy').addEventListener('click', copyPresets);
   document.getElementById('btn-reset').addEventListener('click', resetPresets);
   document.getElementById('dump').addEventListener('blur', function(){ this.hidden = true; });
@@ -943,7 +1039,9 @@ function init(){
     '<b>Два источника, переключатель на карточке.</b> <b>Осц</b> — короткий тон на каждую букву (Undertale / Celeste), ассетов не требует. '
     + '<b>Сэмпл</b> — как в Aurelia: записанное «мх» на каждый N-й символ (по умолчанию 4-й; считаются все символы, включая пробелы и знаки), '
     + 'сэмпл каждый раз случайный из банка, playbackRate случайный в [питч мин, питч макс], наложение не гасится — галка «обрезать пред.» включает обрезку. '
-    + 'Встроенные банки: 58 и 54, по три «мх», вырезаны из bark-мычания. У 57 и Олега своего банка нет — играет банк Чейза со сдвинутым питчем, так и подписано. '
+    + 'Встроенные банки: 58 и 54, по три «мх», вырезаны из bark-мычания. У остальных девяти своего банка нет — играет банк Чейза со сдвинутым питчем, так и подписано. '
+    + '<b>Пресеты 54, 57 и 58</b> отобраны на слух; остальные — прикидка по voiceNote из casting.json, их и надо слушать. '
+    + 'Карточка сворачивается кнопкой «–» в строку «портрет · имя · ▶ · источник · сводка»; свёрнутость помнится в localStorage. '
     + 'Свои сэмплы — перетащить 1–6 файлов wav/ogg/mp3 на карточку; они живут до перезагрузки и в пресет не пишутся (только ярлык <b>bank</b>). '
     + 'Сэмплы Aurelia лежат в <b>C:/Program Files (x86)/Steam/steamapps/common/Aurelia/so_*.ogg</b> — чужой ассет, в страницу не вшит. '
     + 'Темп печати, паузы, вопрос и НЧ-фильтр общие для источников. Мастер −12 дБ, «радиолиния» — highpass 300 + lowpass 3400. '
@@ -960,6 +1058,7 @@ function init(){
     KNOBS: KNOBS, KNOBS_SMP: KNOBS_SMP, WAVES: WAVES, SOURCES: SOURCES, FIELDS: FIELDS,
     BANK_OF: BANK_OF, ui: ui, BUILD: BUILD, debug: debug,
     exportJson: exportJson, copy: copyPresets, reset: resetPresets,
+    setCollapsed: setCollapsed, collapseAll: collapseAll, presetSummary: presetSummary,
     timeline: timeline, questionRise: questionRise,
     sampleIndexes: sampleIndexes, sampleCount: sampleCount,
     ensureBanks: ensureBanks, loadCustomBank: loadCustomBank, bankId: bankId, bankNote: bankNote,

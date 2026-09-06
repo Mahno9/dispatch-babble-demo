@@ -15,11 +15,18 @@
  * ceil(символов / everyN) нод AudioBufferSourceNode, их playbackRate лежит
  * в [pitchMin, pitchMax], банк подменяется своими файлами.
  *
- * Отдельный прогон — мобильная раскладка (Emulation.setDeviceMetricsOverride,
- * 390×844 и 360×740, mobile:true): страница не едет вбок, тач-цели не мельче
- * 44×44 px, подписи не мельче 11 px, портрет не крупнее 64 px, подвал свёрнут
- * в <details> и раскрывается, звук и печать работают так же, как на десктопе.
- * В конце пишутся screenshot.png (1440×900) и screenshot-mobile.png (390×полная высота).
+ * Одиннадцать карточек (Олег и 53…62): у каждой свой SVG-портрет и непустая реплика,
+ * DEFAULTS отобранных на слух 54/57/58 сверяются поле в поле, экспорт даёт 11 ключей.
+ * Сворачивание: высота карточки падает, в строке остаются портрет, имя, ▶, переключатель
+ * источника и сводка пресета, состояние пишется в localStorage и переживает перезагрузку,
+ * «свернуть все» / «развернуть все» дёргают все одиннадцать.
+ *
+ * Раскладка: на 1440×900 три карточки в ряду и прокрутка только вертикальная, на
+ * промежуточных ширинах колонок 1 (до 720 px), 2 (до 1100 px) и 3 (шире). Отдельный прогон —
+ * мобильная раскладка (Emulation.setDeviceMetricsOverride, 390×844 и 360×740, mobile:true):
+ * страница не едет вбок, тач-цели не мельче 44×44 px, подписи не мельче 11 px, портрет не
+ * крупнее 64 px, подвал свёрнут в <details> и раскрывается, звук и печать работают так же,
+ * как на десктопе. В конце пишутся screenshot.png и screenshot-mobile.png — обе страницы целиком.
  */
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync, statSync } from 'node:fs';
@@ -109,7 +116,17 @@ await sleep(300);
 
 const results = [];
 const ok = (name, pass, note = '') => { results.push({ name, pass, note }); };
-const CHARS = ['58', '54', '57', 'oleg'];
+/** Порядок карточек на странице: игрок первым, дальше номера по возрастанию. */
+const CHARS = ['oleg', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62'];
+/** Отобранное разработчиком на слух — сверяется поле в поле, чтобы правка вслепую не прошла молча. */
+const TUNED = {
+  '54': { source:'osc', wave:'triangle', hz:365, jitter:4, charMs:33, blipMs:31, decayMs:25, lowpass:7600, pauseMul:1, questionMul:1.15, consonantDip:false,
+          everyN:4, pitchMin:0.9, pitchMax:1.05, sampleGain:-6, cut:false },
+  '57': { source:'osc', wave:'square', hz:75, jitter:4, charMs:45, blipMs:110, decayMs:80, lowpass:1200, pauseMul:1.3, questionMul:1.1, consonantDip:true,
+          everyN:4, pitchMin:0.7, pitchMax:0.8, sampleGain:-6, cut:false },
+  '58': { source:'osc', wave:'triangle', hz:273, jitter:3, charMs:57, blipMs:93, decayMs:20, lowpass:4250, pauseMul:1, questionMul:1.15, consonantDip:true,
+          everyN:5, pitchMin:0.85, pitchMax:1.27, sampleGain:-4, cut:true },
+};
 const OSC_FIELDS = ['source', 'wave', 'hz', 'jitter', 'charMs', 'blipMs', 'decayMs', 'lowpass', 'pauseMul', 'questionMul', 'consonantDip'];
 const SMP_FIELDS = ['everyN', 'pitchMin', 'pitchMax', 'sampleGain', 'cut'];
 const FIELDS = OSC_FIELDS.concat(SMP_FIELDS);
@@ -122,6 +139,13 @@ const dom = await evalJs(`JSON.stringify({
   lastNodes: Array.isArray(window.__babble.debug && window.__babble.debug.lastNodes),
   cards: [...document.querySelectorAll('.card')].map(c => c.dataset.id),
   portraits: document.querySelectorAll('.card .pic svg').length,
+  noimg: document.querySelectorAll('.card .pic .noimg').length,
+  picSizes: [...document.querySelectorAll('.card .pic svg')]
+    .map(s => Math.round(s.getBoundingClientRect().width) + '×' + Math.round(s.getBoundingClientRect().height)),
+  picBoxes: [...document.querySelectorAll('.card .pic')]
+    .map(s => Math.round(s.getBoundingClientRect().width) + '×' + Math.round(s.getBoundingClientRect().height)),
+  lines: window.__babble.CHARS.map(c => (c.line || '').trim().length),
+  roles: window.__babble.CHARS.filter(c => !(c.role || '').trim()).length,
   knobs: [...document.querySelectorAll('.card[data-id="58"] .knobs.osc input[type=range]')].map(i => i.dataset.k),
   sknobs: [...document.querySelectorAll('.card[data-id="58"] .knobs.sm input[type=range]')].map(i => i.dataset.k),
   waveBtns: document.querySelectorAll('.card[data-id="58"] .wv').length,
@@ -131,33 +155,50 @@ const dom = await evalJs(`JSON.stringify({
   dead: /SamJs|BANKS_B64/.test(document.documentElement.innerHTML),
   oggs: (document.documentElement.innerHTML.match(/data:audio\\/ogg;base64,/g) || []).length,
   aurelia: /so_[a-z0-9_]+\\.ogg/i.test(document.documentElement.innerHTML.replace(/so_\\*\\.ogg/g, '')),
-  // body с overflow:hidden всегда даст scrollHeight = innerHeight, поэтому меряем сам контент:
-  // низ подвала должен быть виден, а терминал — не прокручиваться внутри себя.
-  footBottom: Math.round(document.getElementById('foot').getBoundingClientRect().bottom),
+  // Вертикальная прокрутка теперь разрешена (11 карточек в экран не влезают), а горизонтальной
+  // быть не должно: уехавший вбок ползунок мышью не достать.
   winH: window.innerHeight, winW: window.innerWidth,
-  termOverflowY: document.getElementById('term').scrollHeight - document.getElementById('term').clientHeight,
-  cardBottom: [...document.querySelectorAll('.card')].map(c => Math.round(c.getBoundingClientRect().bottom)),
+  scrollW: document.documentElement.scrollWidth, bodyScrollW: document.body.scrollWidth,
+  scrollH: document.documentElement.scrollHeight,
   cardRight: Math.max(...[...document.querySelectorAll('.card')].map(c => Math.round(c.getBoundingClientRect().right))),
-  knobClipped: [...document.querySelectorAll('.knobs')].filter(k => k.scrollHeight - k.clientHeight > 1).length
+  cardsPerRow: (() => {
+    const tops = [...document.querySelectorAll('.card')].map(c => Math.round(c.getBoundingClientRect().top));
+    return tops.filter(t => t === tops[0]).length;
+  })(),
+  outside: [...document.querySelectorAll('body *')]
+    .filter(e => e.namespaceURI === 'http://www.w3.org/1999/xhtml'
+      && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0
+      && e.getBoundingClientRect().right > window.innerWidth + 1)
+    .map(e => e.tagName.toLowerCase() + '.' + String(e.className || '').trim().split(/\\s+/)[0]).slice(0, 6),
+  stickyText: getComputedStyle(document.getElementById('textrow')).position,
+  knobClipped: [...document.querySelectorAll('.knobs')].filter(k => k.scrollHeight - k.clientHeight > 1).length,
+  outClipped: [...document.querySelectorAll('.card .out')].filter(o => o.scrollHeight - o.clientHeight > 1).length
 })`);
 ok('window.__babble экспортирован (включая banks/loadCustomBank/debug.lastNodes)',
   dom.babble === 'object' && dom.api.length === 0 && dom.lastNodes,
   dom.api.length ? 'нет полей: ' + dom.api.join(', ') : 'play/presets/ctx/exportJson/banks/loadCustomBank/debug на месте');
-ok('4 карточки персонажей', dom.cards.length === 4 && CHARS.every((c) => dom.cards.includes(c)),
-  dom.cards.join(', ') + '; портретов SVG: ' + dom.portraits);
+ok('11 карточек персонажей в порядке «игрок, потом номера», у каждой свой SVG-портрет и непустая реплика',
+  dom.cards.join(',') === CHARS.join(',') && dom.portraits === 11 && dom.noimg === 0
+  && dom.picSizes.every((w) => parseInt(w, 10) > 8) && dom.lines.length === 11 && dom.lines.every((n) => n > 0) && dom.roles === 0,
+  dom.cards.join(', ') + '; портретов SVG ' + dom.portraits + ', текстовых заглушек ' + dom.noimg
+  + ', реплики по ' + dom.lines.join('/') + ' символов; портреты ' + dom.picSizes.join(' ')
+  + ' в колонках ' + dom.picBoxes.join(' '));
 ok('на карточке 8 ползунков осциллятора, 5 сэмплов, 4 волны, 2 источника, зона файлов',
   dom.knobs.length === 8 && dom.sknobs.length === 5 && dom.waveBtns === 4
-  && dom.srcBtns.join(',') === 'osc,samples' && dom.drops === 4,
+  && dom.srcBtns.join(',') === 'osc,samples' && dom.drops === 11,
   'осц: ' + dom.knobs.join(', ') + ' | сэмплы: ' + dom.sknobs.join(', ') + ' | зон файлов ' + dom.drops);
 ok('снятых способов нет, шесть встроенных ogg вшито, чужих ассетов Aurelia нет',
   dom.dead === false && dom.oggs === 6 && dom.aurelia === false,
   'ogg data-URI: ' + dom.oggs + ', хвостов снятых способов: ' + dom.dead + ', so_*.ogg из игры: ' + dom.aurelia);
-ok('страница помещается в 1440×900',
-  dom.footBottom <= dom.winH && dom.termOverflowY <= 1
-  && dom.cardBottom.every((b) => b <= dom.winH) && dom.cardRight <= dom.winW && dom.knobClipped === 0,
-  'низ подвала ' + dom.footBottom + ' из ' + dom.winH + ' px, переполнение терминала ' + dom.termOverflowY
-  + ' px, низ карточек ' + dom.cardBottom.join('/') + ', правый край ' + dom.cardRight + '/' + dom.winW
-  + ', обрезано блоков ручек ' + dom.knobClipped);
+ok('на 1440×900: три карточки в ряду, прокрутка только вертикальная, ничего не обрезано',
+  dom.winW === 1440 && dom.cardsPerRow === 3 && dom.scrollW <= dom.winW && dom.bodyScrollW <= dom.winW
+  && dom.cardRight <= dom.winW && dom.outside.length === 0
+  && dom.knobClipped === 0 && dom.outClipped === 0 && dom.scrollH > dom.winH,
+  'карточек в ряду ' + dom.cardsPerRow + ', scrollWidth ' + dom.scrollW + '/' + dom.winW
+  + ', высота страницы ' + dom.scrollH + ' при экране ' + dom.winH
+  + ', правый край карточек ' + dom.cardRight + ', за краем: ' + (dom.outside.join(', ') || 'ничего')
+  + ', обрезано ручек ' + dom.knobClipped + ', реплик ' + dom.outClipped);
+ok('поле текста липкое (position: sticky)', dom.stickyText === 'sticky', 'position: ' + dom.stickyText);
 ok('реплика по умолчанию подставлена', dom.text.length > 0, JSON.stringify(dom.text));
 
 /* --- 2. стартовые пресеты --- */
@@ -171,6 +212,101 @@ ok('пресеты — плоские, по 16 полей на персонаж�
 ok('стартовые значения = DEFAULTS, стартовый источник у всех — осциллятор',
   JSON.stringify(start.presets) === JSON.stringify(start.defaults)
   && CHARS.every((c) => start.presets[c].source === 'osc'));
+
+/* Отобранное на слух сверяем поле в поле: молча съехавший blipMs или decayMs потом
+   не отличить от «так и было задумано». */
+const tunedBad = [];
+for (const [cid, want] of Object.entries(TUNED)) {
+  for (const f of FIELDS) {
+    if (start.defaults[cid][f] !== want[f]) {
+      tunedBad.push(cid + '.' + f + ' = ' + JSON.stringify(start.defaults[cid][f]) + ' вместо ' + JSON.stringify(want[f]));
+    }
+  }
+}
+ok('DEFAULTS 54/57/58 — ровно отобранные разработчиком значения', tunedBad.length === 0,
+  tunedBad.length ? tunedBad.join('; ')
+    : Object.keys(TUNED).map((c) => c + ': ' + TUNED[c].wave + ' ' + TUNED[c].hz + ' Гц, '
+      + TUNED[c].charMs + '/' + TUNED[c].blipMs + ' мс, НЧ ' + TUNED[c].lowpass).join(' | '));
+
+/* --- 2b. сворачивание карточек: высота, состав свёрнутой строки, localStorage, «свернуть/развернуть все» --- */
+const LS_KEY = 'babble-demo-20260905-chip';
+const collapseOne = await evalJs(`(() => {
+  const b = window.__babble;
+  const card = (id) => document.querySelector('.card[data-id="' + id + '"]');
+  const h = (id) => Math.round(card(id).getBoundingClientRect().height);
+  const stored = () => { try { return JSON.parse(localStorage.getItem(${JSON.stringify(LS_KEY)})).ui.collapsed || {}; } catch (e) { return null; } };
+  const shown = (e) => !!e && e.offsetParent !== null;
+  const openH = h('58'), neighbourOpen = h('57');
+  document.getElementById('col-58').click();
+  const c58 = card('58');
+  const row = {
+    closedH: h('58'), neighbour: h('57'),
+    cls: c58.classList.contains('collapsed'),
+    sum: document.getElementById('sum-58').textContent,
+    sumShown: shown(document.getElementById('sum-58')),
+    picW: Math.round(c58.querySelector('.pic').getBoundingClientRect().width),
+    play: shown(c58.querySelector('.play')),
+    srcSw: [...c58.querySelectorAll('.sw')].filter(shown).length,
+    knobs: [...c58.querySelectorAll('.knobs.osc input[type=range]')].filter(shown).length,
+    out: shown(c58.querySelector('.out')),
+    role: shown(c58.querySelector('.rl')),
+    btn: document.getElementById('col-58').textContent,
+    stored: stored()
+  };
+  document.getElementById('col-58').click();
+  row.reopenH = h('58');
+  row.storedAfter = stored();
+  row.summaryFn = b.presetSummary('58');
+  return JSON.stringify(Object.assign(row, { openH: openH, neighbourOpen: neighbourOpen }));
+})()`);
+ok('карточка сворачивается: высота падает, остаётся строка «портрет 40 · имя · ▶ · осц/сэмпл · сводка»',
+  collapseOne.cls && collapseOne.closedH < collapseOne.openH / 2 && collapseOne.closedH <= 56
+  && collapseOne.reopenH === collapseOne.openH && collapseOne.neighbour === collapseOne.neighbourOpen
+  && collapseOne.picW <= 42 && collapseOne.play && collapseOne.srcSw === 2 && collapseOne.sumShown
+  && collapseOne.knobs === 0 && collapseOne.out === false && collapseOne.role === false
+  && collapseOne.sum === 'tri 273 Гц · 57 мс' && collapseOne.btn === '+',
+  '58: ' + collapseOne.openH + ' → ' + collapseOne.closedH + ' → ' + collapseOne.reopenH + ' px (соседняя 57: '
+  + collapseOne.neighbourOpen + ' → ' + collapseOne.neighbour + '), портрет ' + collapseOne.picW
+  + ' px, сводка «' + collapseOne.sum + '», видно ▶ ' + collapseOne.play + ', источников ' + collapseOne.srcSw
+  + ', ползунков ' + collapseOne.knobs + ', реплика ' + collapseOne.out);
+ok('свёрнутость пишется в localStorage и снимается оттуда же',
+  collapseOne.stored && collapseOne.stored['58'] === true && Object.keys(collapseOne.stored).length === 1
+  && collapseOne.storedAfter && Object.keys(collapseOne.storedAfter).length === 0,
+  'после сворачивания ' + JSON.stringify(collapseOne.stored) + ', после разворачивания '
+  + JSON.stringify(collapseOne.storedAfter));
+
+// «свернуть все» → перезагрузка страницы: состояние должно вернуться из localStorage, а не сброситься
+const collAll = await evalJs(`(() => {
+  document.getElementById('btn-collapse').click();
+  return JSON.stringify({
+    collapsed: document.querySelectorAll('.card.collapsed').length,
+    page: document.documentElement.scrollHeight,
+    cards: Math.round(document.getElementById('cards').getBoundingClientRect().height),
+    stored: Object.keys(JSON.parse(localStorage.getItem(${JSON.stringify(LS_KEY)})).ui.collapsed).length
+  });
+})()`);
+await send('Page.navigate', { url: PAGE });
+await sleep(1000);
+const restored = await evalJs(`JSON.stringify({
+  collapsed: document.querySelectorAll('.card.collapsed').length,
+  cards: Math.round(document.getElementById('cards').getBoundingClientRect().height)
+})`);
+const expAll = await evalJs(`(() => {
+  document.getElementById('btn-expand').click();
+  return JSON.stringify({
+    collapsed: document.querySelectorAll('.card.collapsed').length,
+    cards: Math.round(document.getElementById('cards').getBoundingClientRect().height),
+    stored: Object.keys(JSON.parse(localStorage.getItem(${JSON.stringify(LS_KEY)})).ui.collapsed).length
+  });
+})()`);
+ok('«свернуть все» / «развернуть все» работают и переживают перезагрузку',
+  collAll.collapsed === 11 && collAll.stored === 11 && restored.collapsed === 11
+  && expAll.collapsed === 0 && expAll.stored === 0
+  // страница короче экрана не станет (min-height:100vh), поэтому меряем сам блок карточек
+  && collAll.cards < expAll.cards / 2 && restored.cards === collAll.cards,
+  'свёрнуто ' + collAll.collapsed + '/11 (блок карточек ' + collAll.cards + ' px), после перезагрузки '
+  + restored.collapsed + '/11 (' + restored.cards + ' px), после «развернуть все» ' + expAll.collapsed
+  + '/11 (' + expAll.cards + ' px)');
 
 /* --- 3. AudioContext --- */
 const ac = await evalJs(`(async () => {
@@ -278,7 +414,7 @@ const knob = await evalJs(`(async () => {
 const knobPass = knob.hz.field === 305 && knob.hz.label === '305'
   && knob.cm.field === 70 && knob.lp.field === 5000 && knob.pm.field === 2
   && knob.wave58 === 'square' && knob.dip54 === false
-  && knob.other58 === 22 && knob.other54 === 190          // соседние поля/персонажи не поехали
+  && knob.other58 === 57 && knob.other54 === 365          // соседние поля/персонажи не поехали
   && knob.play58.hz === 305 && knob.play58.wave === 'square'
   && knob.play54 === 70 && knob.playOleg === 5000
   && knob.withPause > knob.noPause && knob.stored === 305;
@@ -311,7 +447,8 @@ const sknob = await evalJs(`(async () => {
 ok('ползунки сэмплов правят свои поля и сохраняются',
   sknob.n.field === 6 && sknob.n.label === '6' && sknob.g.field === -14 && sknob.g.label === '-14'
   && sknob.pmin.field === 0.62 && sknob.pmin.label === '0.62'
-  && sknob.cutOleg === true && sknob.cut58 === false && sknob.hz58 === 305 && sknob.stored === 6,
+  // у Олега «обрезать» стартово выключена и включилась, у 58 она стартово включена и осталась
+  && sknob.cutOleg === true && sknob.cut58 === true && sknob.hz58 === 305 && sknob.stored === 6,
   '58 everyN→' + sknob.n.field + ', 54 sampleGain→' + sknob.g.field + ' дБ, 57 pitchMin→' + sknob.pmin.field
   + ', галка «обрезать» у oleg ' + sknob.cutOleg + ' (у 58 ' + sknob.cut58 + '), поле осциллятора 58 hz цело: ' + sknob.hz58
   + ', в localStorage everyN ' + sknob.stored);
@@ -320,13 +457,13 @@ ok('ползунки сэмплов правят свои поля и сохра
 const exp = await evalJs(`JSON.stringify({ raw: window.__babble.exportJson() })`);
 let expObj = null, expErr = '';
 try { expObj = JSON.parse(exp.raw); } catch (e) { expErr = e.message; }
-const expPass = !!expObj && Object.keys(expObj).length === 4 && CHARS.every((c) => expObj[c]
+const expPass = !!expObj && Object.keys(expObj).length === 11 && CHARS.every((c) => expObj[c]
   && Object.keys(expObj[c]).join(',') === EXPORT_KEYS.join(',')
   && typeof expObj[c].wave === 'string' && typeof expObj[c].hz === 'number'
   && typeof expObj[c].consonantDip === 'boolean' && typeof expObj[c].cut === 'boolean'
   && ['osc', 'samples'].includes(expObj[c].source)
   && /^(builtin:(58|54)|custom)$/.test(expObj[c].bank));
-ok('exportJson() — валидный плоский JSON на четыре ключа, с source и bank', expPass,
+ok('exportJson() — валидный плоский JSON на одиннадцать ключей, с source и bank', expPass,
   expErr ? 'не разобрался: ' + expErr
     : 'ключи ' + Object.keys(expObj).join(',') + '; 58 = ' + JSON.stringify(expObj['58'])
       + '; банки: ' + CHARS.map((c) => c + '=' + expObj[c].bank).join(' '));
@@ -349,9 +486,9 @@ const reset = await evalJs(`(() => {
   });
 })()`);
 ok('сброс возвращает стартовые пресеты и синхронизирует ручки обоих источников',
-  reset.same && reset.hz58 === 130 && reset.wave58 === 'triangle' && reset.slider === '130'
-  && reset.label === '130' && reset.waveOn === 'triangle' && reset.dip54 === true
-  && reset.n58 === '4' && reset.nLabel === '4' && reset.cutOleg === false && reset.srcOn === 'osc',
+  reset.same && reset.hz58 === 273 && reset.wave58 === 'triangle' && reset.slider === '273'
+  && reset.label === '273' && reset.waveOn === 'triangle' && reset.dip54 === false
+  && reset.n58 === '5' && reset.nLabel === '5' && reset.cutOleg === false && reset.srcOn === 'osc',
   '58: ' + reset.wave58 + ' ' + reset.hz58 + ' Гц, ползунок ' + reset.slider + ', подсвечена ' + reset.waveOn
   + ', галка 54 ' + reset.dip54 + ', everyN 58 ' + reset.n58 + ', «обрезать» oleg ' + reset.cutOleg
   + ', источник 58 ' + reset.srcOn);
@@ -366,7 +503,7 @@ const after = await evalJs(`(async () => {
   return JSON.stringify({ hz: r.hz, wave: r.wave, events: r.events, typed: typed, chars: r.chars });
 })()`);
 ok('после сброса реплика играет стартовым пресетом',
-  after.hz === 130 && after.wave === 'triangle' && after.events > 0 && after.typed === after.chars,
+  after.hz === 273 && after.wave === 'triangle' && after.events > 0 && after.typed === after.chars,
   after.wave + ' ' + after.hz + ' Гц, осцилляторов ' + after.events + ', напечатано ' + after.typed + '/' + after.chars);
 
 /* --- 9. печать реально бежит: rAF жив, а не «замер» на невидимой странице --- */
@@ -434,7 +571,7 @@ const swUi = await evalJs(`(() => {
   // и обратно в сэмплы — дальше проверяем именно этот режим
   document.querySelector(card + '.sw[data-src="samples"]').click();
   const notes = {};
-  for (const c of ['58','54','57','oleg']) notes[c] = b.bankNote(c);
+  for (const c of b.CHARS) notes[c.id] = b.bankNote(c.id);
   return JSON.stringify({ on: on, off: off, notes: notes });
 })()`);
 ok('переключатель источника прячет ползунки неактивного и сохраняется',
@@ -444,10 +581,12 @@ ok('переключатель источника прячет ползунки 
   'сэмплы: видно ползунков осц ' + swUi.on.oscKnobs + ', сэмпл ' + swUi.on.smpKnobs + ', волн ' + swUi.on.waves
   + ', зона файлов ' + swUi.on.drop + '; осциллятор: осц ' + swUi.off.oscKnobs + ', сэмпл ' + swUi.off.smpKnobs
   + ', волн ' + swUi.off.waves);
-ok('банк подписан честно: у 57 и Олега — банк Чейза со сдвигом',
+const borrowers = CHARS.filter((c) => c !== '58' && c !== '54');
+ok('банк подписан честно: свой только у 58 и 54, остальные девять — банк Чейза со сдвигом',
   /встроенный банк 58/.test(swUi.notes['58']) && /встроенный банк 54/.test(swUi.notes['54'])
-  && /банк Чейза, сдвинут/.test(swUi.notes['57']) && /банк Чейза, сдвинут/.test(swUi.notes['oleg']),
-  CHARS.map((c) => c + ': ' + swUi.notes[c]).join(' | '));
+  && borrowers.length === 9 && borrowers.every((c) => /банк Чейза, сдвинут/.test(swUi.notes[c])),
+  '58: ' + swUi.notes['58'] + ' | 54: ' + swUi.notes['54'] + ' | остальные ('
+  + borrowers.join(',') + '): ' + swUi.notes[borrowers[0]]);
 
 /* --- 12. play() в режиме сэмплов: ceil(символов / everyN) нод AudioBufferSourceNode --- */
 const smp = await evalJs(`(async () => {
@@ -580,7 +719,7 @@ ok('свой банк заменяет встроенный: bank = "custom", и
   + custom.bank57 + ' (' + custom.size57 + ', ' + custom.durations.join('/') + ' с), 58 остался ' + custom.bank58
   + '; подпись «' + custom.note + '»; имена файлов в экспорте: ' + custom.exportNames);
 
-/* --- 15. страница с сэмплами на всех карточках всё ещё помещается в 1440×900 --- */
+/* --- 15. с сэмплами на всех одиннадцати карточках вёрстка не едет вбок --- */
 const fit = await evalJs(`(() => {
   const b = window.__babble;
   for (const c of b.CHARS) { b.presets[c.id].source = 'samples'; }
@@ -588,11 +727,18 @@ const fit = await evalJs(`(() => {
   return JSON.stringify({
     sources: b.CHARS.map(c => b.presets[c.id].source),
     smpVisible: [...document.querySelectorAll('.card .smp')].filter(e => e.offsetParent !== null).length,
-    footBottom: Math.round(document.getElementById('foot').getBoundingClientRect().bottom),
     winH: window.innerHeight, winW: window.innerWidth,
-    termOverflowY: document.getElementById('term').scrollHeight - document.getElementById('term').clientHeight,
-    cardBottom: [...document.querySelectorAll('.card')].map(c => Math.round(c.getBoundingClientRect().bottom)),
+    scrollW: document.documentElement.scrollWidth,
     cardRight: Math.max(...[...document.querySelectorAll('.card')].map(c => Math.round(c.getBoundingClientRect().right))),
+    cardsPerRow: (() => {
+      const tops = [...document.querySelectorAll('.card')].map(c => Math.round(c.getBoundingClientRect().top));
+      return tops.filter(t => t === tops[0]).length;
+    })(),
+    outside: [...document.querySelectorAll('body *')]
+      .filter(e => e.namespaceURI === 'http://www.w3.org/1999/xhtml'
+        && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0
+        && e.getBoundingClientRect().right > window.innerWidth + 1)
+      .map(e => e.tagName.toLowerCase() + '.' + String(e.className || '').trim().split(/\\s+/)[0]).slice(0, 6),
     knobClipped: [...document.querySelectorAll('.knobs')].filter(k => k.scrollHeight - k.clientHeight > 1).length,
     outClipped: [...document.querySelectorAll('.card .out')].filter(o => o.scrollHeight - o.clientHeight > 1).length,
     minFont: Math.min(...[...document.querySelectorAll('.card .knob label, .card .drop, .card .bank')]
@@ -600,13 +746,13 @@ const fit = await evalJs(`(() => {
   });
 })()`);
 // Кегль не трогали: 8,5 px — тот же, что был у подписей ползунков до появления сэмплов.
-ok('с сэмплами на всех карточках страница помещается в 1440×900, кегль прежний (8,5 px)',
-  fit.sources.every((s) => s === 'samples') && fit.smpVisible === 4
-  && fit.footBottom <= fit.winH && fit.termOverflowY <= 1
-  && fit.cardBottom.every((b) => b <= fit.winH) && fit.cardRight <= fit.winW
+ok('с сэмплами на всех 11 карточках прокрутки вбок нет, три в ряду, кегль прежний (8,5 px)',
+  fit.sources.every((s) => s === 'samples') && fit.smpVisible === 11 && fit.cardsPerRow === 3
+  && fit.scrollW <= fit.winW && fit.cardRight <= fit.winW && fit.outside.length === 0
   && fit.knobClipped === 0 && fit.outClipped === 0 && fit.minFont >= 8.5,
-  'низ подвала ' + fit.footBottom + '/' + fit.winH + ', переполнение ' + fit.termOverflowY
-  + ', низ карточек ' + fit.cardBottom.join('/') + ', правый край ' + fit.cardRight + '/' + fit.winW
+  'блоков сэмплов видно ' + fit.smpVisible + ', карточек в ряду ' + fit.cardsPerRow
+  + ', scrollWidth ' + fit.scrollW + '/' + fit.winW + ', правый край ' + fit.cardRight
+  + ', за краем: ' + (fit.outside.join(', ') || 'ничего')
   + ', обрезано ручек ' + fit.knobClipped + ', обрезано реплик ' + fit.outClipped
   + ', мин. кегль ' + fit.minFont + ' px');
 
@@ -658,8 +804,8 @@ const MOBILE_PROBE = `(async () => {
   const osc = {
     scrollW: document.documentElement.scrollWidth,
     bodyScrollW: document.body.scrollWidth,
-    small: tooSmall('.card .play, .card .sw, .card .wv'),
-    targets: [...document.querySelectorAll('.card .play, .card .sw, .card .wv')].filter(shown).length,
+    small: tooSmall('.card .play, .card .col, .card .sw, .card .wv'),
+    targets: [...document.querySelectorAll('.card .play, .card .col, .card .sw, .card .wv')].filter(shown).length,
     outside: outside(),
     labelMin: Math.min(...[...document.querySelectorAll('.card .knob label, .card .head .rl, .chip')]
       .filter(shown).map(e => parseFloat(getComputedStyle(e).fontSize))),
@@ -683,11 +829,12 @@ const MOBILE_PROBE = `(async () => {
   document.getElementById('k-vol').dispatchEvent(new Event('input', { bubbles: true }));
   const smp = {
     scrollW: document.documentElement.scrollWidth,
-    small: tooSmall('.card .play, .card .sw, .card .drop'),
+    small: tooSmall('.card .play, .card .col, .card .sw, .card .drop'),
     outside: outside(),
     dropText: (document.querySelector('.card .drop') || {}).textContent,
     dropMobShown: [...document.querySelectorAll('.card .drop .mob')].filter(shown).length,
     dropDeskShown: [...document.querySelectorAll('.card .drop .desk')].filter(shown).length,
+    cards: document.querySelectorAll('.card').length,
     labelMin: Math.min(...[...document.querySelectorAll('.card .knobs.sm .knob label')]
       .filter(shown).map(e => parseFloat(getComputedStyle(e).fontSize)))
   };
@@ -751,7 +898,7 @@ for (const vp of VIEWPORTS) {
     m.foot.closed && m.foot.opened && m.foot.closedAgain && m.foot.sumH >= 44
     && m.foot.hClosed <= m.foot.sumH + 4 && m.foot.hOpen > m.foot.hClosed + 100
     && m.foot.pageOpen > m.foot.pageClosed + 100
-    && m.smp.dropMobShown === 4 && m.smp.dropDeskShown === 0
+    && m.smp.dropMobShown === 11 && m.smp.dropDeskShown === 0
     && m.play.events > 0 && m.play.typed === m.play.chars && m.play.ctxState === 'running'
     && /RUNNING/.test(m.play.chip),
     'подвал: закрыт ' + m.foot.closed + ' (' + m.foot.hClosed + ' px, страница ' + m.foot.pageClosed
@@ -766,7 +913,8 @@ for (const vp of VIEWPORTS) {
 const SWEEP = [
   { w: 414, h: 896, cols: 1 }, { w: 480, h: 800, cols: 1 }, { w: 600, h: 900, cols: 1 },
   { w: 720, h: 900, cols: 1 }, { w: 768, h: 1024, cols: 2 }, { w: 1024, h: 768, cols: 2 },
-  { w: 1100, h: 800, cols: 2 },
+  { w: 1100, h: 800, cols: 2 }, { w: 1101, h: 800, cols: 3 }, { w: 1280, h: 800, cols: 3 },
+  { w: 1600, h: 900, cols: 3 },
 ];
 const sweepRows = [];
 let sweepPass = true;
@@ -792,23 +940,28 @@ for (const s of SWEEP) {
   sweepRows.push(s.w + ': ' + r.scrollW + '/' + r.iw + ' px, колонок ' + r.cols
     + (r.outside.length ? ', ЗА КРАЕМ ' + r.outside.join(',') : ''));
 }
-ok('на промежуточных ширинах прокрутки вбок нет, колонок 1 до 720 px и 2 до 1100 px',
+ok('на промежуточных ширинах прокрутки вбок нет: колонок 1 до 720 px, 2 до 1100 px, 3 шире',
   sweepPass, sweepRows.join(' | '));
 
 /* --- скриншоты: десктоп и телефон целиком --- */
 await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
 await sleep(400);
-await evalJs(`(async () => {
+const deskPrep = await evalJs(`(async () => {
   const b = window.__babble;
   b.reset();
+  b.collapseAll(false);
   for (const cid of ['58','57']) document.querySelector('.card[data-id="' + cid + '"] .sw[data-src="samples"]').click();
+  // две свёрнутые карточки в кадре: на скриншоте должны быть видны оба состояния
+  for (const cid of ['61','62']) b.setCollapsed(cid, true);
   await b.ensureBanks();
   await b.play('58', 'Хранилище смотришь?');
   await new Promise(r => setTimeout(r, 380));
-  return "0";
+  return JSON.stringify({ h: document.documentElement.scrollHeight, w: document.documentElement.scrollWidth });
 })()`);
-const deskShot = await send('Page.captureScreenshot',
-  { format: 'png', clip: { x: 0, y: 0, width: 1440, height: 900, scale: 1 } });
+const deskShot = await send('Page.captureScreenshot', {
+  format: 'png', captureBeyondViewport: true,
+  clip: { x: 0, y: 0, width: 1440, height: Math.min(deskPrep.h, 6000), scale: 1 },
+});
 writeFileSync(join(DIR, 'screenshot.png'), Buffer.from(deskShot.result.data, 'base64'));
 
 await evalJs('(window.__babble.stop(), "0")');
@@ -817,6 +970,8 @@ await sleep(500);
 const mobPrep = await evalJs(`(async () => {
   const b = window.__babble;
   b.reset();
+  b.collapseAll(false);
+  for (const cid of ['60','61','62']) b.setCollapsed(cid, true);
   document.querySelector('.card[data-id="57"] .sw[data-src="samples"]').click();
   await b.ensureBanks();
   await b.play('58', 'Хранилище смотришь?');
@@ -831,10 +986,12 @@ writeFileSync(join(DIR, 'screenshot-mobile.png'), Buffer.from(mobShot.result.dat
 await evalJs('(window.__babble.stop(), "0")');
 
 const shots = ['screenshot.png', 'screenshot-mobile.png'].map((f) => ({ f, size: statSync(join(DIR, f)).size }));
-ok('скриншоты записаны: 1440×900 и 390×' + mobPrep.h + ' целиком',
-  shots.every((s) => s.size > 20000) && mobPrep.h > 844 && mobPrep.w <= 390,
+ok('скриншоты записаны целиком: 1440×' + deskPrep.h + ' и 390×' + mobPrep.h,
+  shots.every((s) => s.size > 20000) && deskPrep.h >= 900 && deskPrep.w <= 1440
+  && mobPrep.h > 844 && mobPrep.w <= 390,
   shots.map((s) => s.f + ' ' + (s.size / 1024).toFixed(0) + ' КБ').join(', ')
-  + '; высота мобильной страницы ' + mobPrep.h + ' px при ширине ' + mobPrep.w);
+  + '; десктопная страница ' + deskPrep.h + ' px при ширине ' + deskPrep.w
+  + ', мобильная ' + mobPrep.h + ' px при ширине ' + mobPrep.w);
 
 /* --- 17. консоль --- */
 ok('нет ошибок в консоли', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' ; ') || '—');

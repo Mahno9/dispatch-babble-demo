@@ -16,8 +16,8 @@ import { fileURLToPath } from 'node:url';
 const DIR = dirname(fileURLToPath(import.meta.url));
 const MAX_BYTES = 512 * 1024;
 const PORTRAIT_DIR = resolve(DIR, '..', 'voices-20260905', 'portraits');
-const CHAR_IDS = ['58', '54', '57', 'oleg'];
-/** Встроенные банки: у кого есть свои вырезанные «мх». 57 и oleg играют банк 58 со сдвигом питча. */
+const CHAR_IDS = ['oleg', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62'];
+/** Встроенные банки: у кого есть свои вырезанные «мх». Остальные играют банк 58 со сдвигом питча. */
 const HUM_BANKS = { '58': [1, 2, 3], '54': [1, 2, 3] };
 const HUM_MAX_BYTES = 64 * 1024;   // один сэмпл 0,2–0,35 с — заведомо меньше
 
@@ -27,7 +27,8 @@ const fail = (msg) => { console.error('\n  ОШИБКА СБОРКИ: ' + msg + 
 const portraits = {};
 for (const id of CHAR_IDS) {
   const p = join(PORTRAIT_DIR, id + '.svg');
-  if (!existsSync(p)) { console.warn('  ! нет портрета ' + id + '.svg — на карточке будет текстовая заглушка'); continue; }
+  // заглушка вместо портрета — это молчаливая потеря: страница отбора без лица персонажа бесполезна
+  if (!existsSync(p)) fail('нет портрета ' + p + ' — на карточке была бы текстовая заглушка');
   const svg = readFileSync(p, 'utf8').replace(/<\?xml[^>]*\?>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '').trim();
   if (!/^<svg[\s>]/i.test(svg)) fail('портрет не начинается с <svg>: ' + p);
   portraits[id] = svg;
